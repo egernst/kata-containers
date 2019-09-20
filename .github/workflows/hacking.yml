@@ -13,8 +13,8 @@ jobs:
     - name : the ok ok 
       run: |  
         echo "hello worold"
-        sudo apt-get update
-        sudo apt-get install -y curl git
+        #sudo apt-get update
+        #sudo apt-get install -y curl git
         echo "still?"
         # for test development:
         git clone https://github.com/egernst/packaging-1
@@ -29,6 +29,8 @@ jobs:
         echo "github tag?" $GITHUB_REF
         echo "github sha" 
         echo $GITHUB_SHA
+
+        echo `git branch -a --contains $GITHUB_TAG | cut -d/ -f3-`
 
         echo `git branch -a --contains $GITHUB_SHA`
         echo "done...."
