@@ -30,6 +30,7 @@ jobs:
         echo "github sha" 
         echo $GITHUB_SHA
 
+        echo `git branch -a --continues $GITHUB_SHA`
         echo "done...."
 
         #        docker run alpine sh -c date
