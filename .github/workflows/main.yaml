@@ -36,7 +36,9 @@ jobs:
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
            git checkout $tag
-           ../obs-packaging/gen_versions_txt.sh $tag
+           pushd ../obs-packaging
+           ./gen_versions_txt.sh $tag
+           popd
            # Build the kernel:
            source ./kata-deploy-binaries.sh
            install_kernel
@@ -178,7 +180,9 @@ jobs:
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
            git checkout $tag
-           ../obs-packaging/gen_versions_txt.sh $tag
+           pushd ../obs-packaging
+           ./gen_versions_txt.sh $tag
+           popd
            # Build the VMM:
            source ./kata-deploy-binaries.sh
            install_image $tag
