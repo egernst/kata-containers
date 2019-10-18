@@ -285,7 +285,6 @@ jobs:
           # Get versions information
           tag=`echo $GITHUB_REF | cut -d/ -f3-`
           popd >>/dev/null
-          tarball_name="kata-static-$tag-x86_64.tar.xz"
           pushd kata-artifacts >>/dev/null 
           for c in ./*.tar.gz
           do 
@@ -294,15 +293,14 @@ jobs:
           done
           ls ./opt/kata/bin
           ls ./opt/kata/share
-          tar cfJ "../${tarball_name}" "./opt"
+          tar cfJ ../kata-static.tar.xz ./opt
           popd >>/dev/null
           ls -l && ls kata-artifacts
-          echo ::set-env name=tarball::tarball_name
       - name: store-artifacts
         uses: actions/upload-artifact@master
         with: 
           name: release-candidate
-          path: "$tarball"
+          path: kata-static.tar.xz 
 
   kata-deploy:
     needs: gather-artifacts
@@ -319,8 +317,7 @@ jobs:
           pushd kata-packaging
           pkg_sha=$(git rev-parse HEAD)
           popd
-          tarball_name=kata-static-$tag-x86_64.tar.xz"
-          mv release-candidate/$tarball_name ./kata-packaging/kata-deploy/kata-static.tar.xz
+          mv release-candidate/kata-static.tar.xz ./kata-packaging/kata-deploy/kata-static.tar.xz
           docker build --build-arg KATA_ARTIFACTS=kata-static.tar.xz -t katadocker/kata-deploy-ci:$pkg_sha ./kata-packaging/kata-deploy
           docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
           docker push katadocker/kata-deploy-ci:$pkg_sha
