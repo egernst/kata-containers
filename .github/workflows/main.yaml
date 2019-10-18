@@ -297,11 +297,12 @@ jobs:
           tar cfJ "../${tarball_name}" "./opt"
           popd >>/dev/null
           ls -l && ls kata-artifacts
+          echo ::set-env name=tarball::tarball_name
       - name: store-artifacts
         uses: actions/upload-artifact@master
         with: 
           name: release-candidate
-          path: ${tarball_name} 
+          path: "$tarball"
 
   kata-deploy:
     needs: gather-artifacts
