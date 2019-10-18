@@ -32,6 +32,7 @@ jobs:
            pushd $GOPATH/src/github.com/amshinde/kata-packaging/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
+           git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the kernel:
            source ./kata-deploy-binaries.sh
@@ -68,6 +69,7 @@ jobs:
            pushd $GOPATH/src/github.com/amshinde/kata-packaging/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
+           git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the kernel:
            source ./kata-deploy-binaries.sh
@@ -102,6 +104,7 @@ jobs:
            pushd $GOPATH/src/github.com/amshinde/kata-packaging/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
+           git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the VMM:
            source ./kata-deploy-binaries.sh
@@ -136,6 +139,7 @@ jobs:
            pushd $GOPATH/src/github.com/amshinde/kata-packaging/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
+           git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the VMM:
            source ./kata-deploy-binaries.sh
@@ -170,6 +174,7 @@ jobs:
            pushd $GOPATH/src/github.com/amshinde/kata-packaging/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
+           git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the VMM:
            source ./kata-deploy-binaries.sh
@@ -204,6 +209,7 @@ jobs:
            pushd $GOPATH/src/github.com/amshinde/kata-packaging/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
+           git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the VMM:
            source ./kata-deploy-binaries.sh
@@ -238,6 +244,7 @@ jobs:
            pushd $GOPATH/src/github.com/amshinde/kata-packaging/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
+           git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the VMM:
            source ./kata-deploy-binaries.sh
