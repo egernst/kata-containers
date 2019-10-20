@@ -10,6 +10,10 @@ jobs:
       - name: get the list
         run: |
          git clone https://github.com/amshinde/kata-packaging
+         pushd kata-packaging
+         tag=`echo $GITHUB_REF | cut -d/ -f3-`
+         git checkout $tag
+         popd
          ./kata-packaging/artifact-list.sh > artifact-list.txt
       - name: save-artifact-list
         uses: actions/upload-artifact@master
