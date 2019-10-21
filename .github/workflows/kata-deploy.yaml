@@ -10,17 +10,18 @@ jobs:
         run: |
           git clone https://github.com/amshinde/kata-packaging
           pushd ./kata-packaging
+          git checkout 1.8.3
           pkg_sha=$(git rev-parse HEAD)
           echo $PWD
           echo $pkg_sha
           echo $(ls)
           echo huh
           popd
-          wget -q https://github.com/kata-containers/runtime/releases/download/1.9.0-rc0/kata-static-1.9.0-rc0-x86_64.tar.xz 
+          wget -q https://github.com/kata-containers/runtime/releases/download/1.8.3/kata-static-1.8.3-x86_64.tar.xz 
           echo $PWD
           echo $(ls)
           echo huh 
-          mv kata-static-1.9.0-rc0-x86_64.tar.xz ./kata-packaging/kata-deploy/kata-static.tar.xz
+          mv kata-static-1.8.3-x86_64.tar.xz ./kata-packaging/kata-deploy/kata-static.tar.xz
           echo $PWD
           echo $(ls)
           echo huh
