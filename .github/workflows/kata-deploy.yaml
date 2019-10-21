@@ -12,7 +12,9 @@ jobs:
           pushd ./kata-packaging
           pkg_sha=$(git rev-parse HEAD)
           echo $PWD
-          echo ls
+          echo $pkg_sha
+          echo $(ls)
+          echo huh
           popd
           wget -q https://github.com/kata-containers/runtime/releases/download/1.9.0-rc0/kata-static-1.8.3-x86_64.tar.xz  
           mv kata-static-1.9.0-rc0-x86_64.tar.xz ./kata-packaging/kata-deploy/kata-static.tar.xz
