@@ -15,7 +15,7 @@ jobs:
          git clone https://${PACKAGING_REPO}
          pushd packaging
          tag=`echo $GITHUB_REF | cut -d/ -f3-`
-         git checkout $tag
+         #git checkout $tag
          popd
          ./packaging/artifact-list.sh > artifact-list.txt
       - name: save-artifact-list
@@ -41,7 +41,7 @@ jobs:
            pushd $GOPATH/src/${PACKAGING_REPO}/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
-           git checkout $tag
+           #git checkout $tag
            pushd ../obs-packaging
            ./gen_versions_txt.sh $tag
            popd
@@ -79,7 +79,7 @@ jobs:
            pushd $GOPATH/src/${PACKAGING_REPO}/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
-           git checkout $tag
+           #git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the kernel:
            source ./kata-deploy-binaries.sh
@@ -114,7 +114,7 @@ jobs:
            pushd $GOPATH/src/${PACKAGING_REPO}/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
-           git checkout $tag
+           #git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the VMM:
            source ./kata-deploy-binaries.sh
@@ -149,7 +149,7 @@ jobs:
            pushd $GOPATH/src/${PACKAGING_REPO}/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
-           git checkout $tag
+           #git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the VMM:
            source ./kata-deploy-binaries.sh
@@ -184,7 +184,7 @@ jobs:
            pushd $GOPATH/src/${PACKAGING_REPO}/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
-           git checkout $tag
+           #git checkout $tag
            pushd ../obs-packaging
            ./gen_versions_txt.sh $tag
            popd
@@ -221,7 +221,7 @@ jobs:
            pushd $GOPATH/src/${PACKAGING_REPO}/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
-           git checkout $tag
+           #git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the VMM:
            source ./kata-deploy-binaries.sh
@@ -256,7 +256,7 @@ jobs:
            pushd $GOPATH/src/${PACKAGING_REPO}/release >>/dev/null
            # Get versions information
            tag=`echo $GITHUB_REF | cut -d/ -f3-`
-           git checkout $tag
+           #git checkout $tag
            ../obs-packaging/gen_versions_txt.sh $tag
            # Build the VMM:
            source ./kata-deploy-binaries.sh
@@ -320,7 +320,7 @@ jobs:
           tag=`echo $GITHUB_REF | cut -d/ -f3-`
           git clone https://${PACKAGING_REPO}
           pushd packaging
-          git checkout $tag
+          #git checkout $tag
           pkg_sha=$(git rev-parse HEAD)
           popd
           mv release-candidate/kata-static.tar.xz ./packaging/kata-deploy/kata-static.tar.xz
