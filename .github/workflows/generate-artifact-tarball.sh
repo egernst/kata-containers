@@ -21,7 +21,10 @@ main() {
 
     go get github.com/kata-containers/packaging || true
     pushd $GOPATH/src/github.com/kata-containers/packaging/release >>/dev/null
-    git checkout $tag
+    git config --global user.email "you@example.com"
+    git config --global user.name "Your Name"
+    git checkout -b jcvenegas-ch-tarball-build master
+    git pull https://github.com/jcvenegas/kata-packaging.git ch-tarball-build
     pushd ../obs-packaging
     ./gen_versions_txt.sh $tag
     popd

@@ -10,9 +10,18 @@ jobs:
       - name: get the list
         run: |
          git clone https://github.com/kata-containers/packaging
+         ## Delete me
+         (
+                cd packaging
+                git config --global user.email "you@example.com"
+                git config --global user.name "Your Name"
+                git checkout -b jcvenegas-ch-tarball-build master
+                git pull https://github.com/jcvenegas/kata-packaging.git ch-tarball-build
+         )
+         ## Delete me
          pushd packaging
          tag=`echo $GITHUB_REF | cut -d/ -f3-`
-         git checkout $tag
+         #git checkout $tag
          popd
          ./packaging/artifact-list.sh > artifact-list.txt
       - name: save-artifact-list
