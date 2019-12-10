@@ -19,8 +19,10 @@ main() {
     tag=$(echo $GITHUB_REF | cut -d/ -f3-)
     export GOPATH=$HOME/go
 
-    go get github.com/kata-containers/packaging || true
-    pushd $GOPATH/src/github.com/kata-containers/packaging/release >>/dev/null
+    PKG_REPO="github.com/egernst/packaging-1"
+
+    go get ${PKG_REPO} || true
+    pushd $GOPATH/src/${PKG_REPO}/release >>/dev/null
     git checkout $tag
     pushd ../obs-packaging
     ./gen_versions_txt.sh $tag
@@ -30,7 +32,7 @@ main() {
     ${artifact_stage} $tag
     popd
 
-    mv $HOME/go/src/github.com/kata-containers/packaging/release/kata-static-${artifact}.tar.gz .
+    mv $HOME/go/src/${PKG_REPO}/release/kata-static-${artifact}.tar.gz .
 }
 
 main $@
