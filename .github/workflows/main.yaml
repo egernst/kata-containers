@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: get the list
         run: |
-         git clone https://github.com/kata-containers/packaging
+         git clone https://github.com/egernst/packaging-1
          pushd packaging
          tag=$(echo $GITHUB_REF | cut -d/ -f3-)
          git checkout $tag
@@ -293,7 +293,7 @@ jobs:
       - name: build-and-push-kata-deploy-ci
         run: |
           tag=$(echo $GITHUB_REF | cut -d/ -f3-)
-          git clone https://github.com/kata-containers/packaging
+          git clone https://github.com/egernst/packaging-1
           pushd packaging
           git checkout $tag
           pkg_sha=$(git rev-parse HEAD)
