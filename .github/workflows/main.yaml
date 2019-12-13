@@ -305,7 +305,7 @@ jobs:
           echo ::set-env name=PKG_SHA::$pkg_sha
           echo ::set-env name=TAG::$tag
       - name: test-kata-deploy-ci-in-aks
-        uses: ./packaging/kata-deploy/action
+        uses: ./packaging/kata-deploy/actions/aks
         with:
           packaging-sha: env.PKG_SHA
         env:
