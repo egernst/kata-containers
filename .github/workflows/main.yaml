@@ -10,11 +10,11 @@ jobs:
       - name: get the list
         run: |
          git clone https://github.com/egernst/packaging-1
-         pushd packaging
+         pushd packaging-1
          tag=$(echo $GITHUB_REF | cut -d/ -f3-)
          git checkout $tag
          popd
-         ./packaging/artifact-list.sh > artifact-list.txt
+         ./packaging-1/artifact-list.sh > artifact-list.txt
       - name: save-artifact-list
         uses: actions/upload-artifact@master
         with:
@@ -294,18 +294,18 @@ jobs:
         run: |
           tag=$(echo $GITHUB_REF | cut -d/ -f3-)
           git clone https://github.com/egernst/packaging-1
-          pushd packaging
+          pushd packaging-1
           git checkout $tag
           pkg_sha=$(git rev-parse HEAD)
           popd
-          mv release-candidate/kata-static.tar.xz ./packaging/kata-deploy/kata-static.tar.xz
-          docker build --build-arg KATA_ARTIFACTS=kata-static.tar.xz -t katadocker/kata-deploy-ci:$pkg_sha ./packaging/kata-deploy
+          mv release-candidate/kata-static.tar.xz ./packaging-1/kata-deploy/kata-static.tar.xz
+          docker build --build-arg KATA_ARTIFACTS=kata-static.tar.xz -t katadocker/kata-deploy-ci:$pkg_sha ./packaging-1/kata-deploy
           docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
           docker push katadocker/kata-deploy-ci:$pkg_sha
           echo ::set-env name=PKG_SHA::$pkg_sha
           echo ::set-env name=TAG::$tag
       - name: test-kata-deploy-ci-in-aks
-        uses: ./packaging/kata-deploy/actions/aks
+        uses: ./packaging-1/kata-deploy/actions/aks
         with:
           packaging-sha: env.PKG_SHA
         env:
