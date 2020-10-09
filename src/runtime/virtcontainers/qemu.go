@@ -1863,6 +1863,13 @@ func (q *qemu) resizeMemory(reqMemMB uint32, memoryBlockSizeMB uint32, probe boo
 	if err != nil {
 		return 0, memoryDevice{}, err
 	}
+
+	q.Logger().WithField("confi-memory", currentMemory).Debug("current memory value")
+	q.Logger().WithField("hotpluggedmem", q.state.HotpluggedMemory).Debug("hotpluged memory")
+	q.Logger().WithField("total", currentMemory).Debug("current memory total")       //2048** This isn't accurate?
+	q.Logger().WithField("requested", reqMemMB).Debug("current memory total")        //3328
+	q.Logger().WithField("blksize", memoryBlockSizeMB).Debug("current memory total") //7
+
 	var addMemDevice memoryDevice
 	if q.config.VirtioMem && currentMemory != reqMemMB {
 		q.Logger().WithField("hotplug", "memory").Debugf("resize memory from %dMB to %dMB", currentMemory, reqMemMB)

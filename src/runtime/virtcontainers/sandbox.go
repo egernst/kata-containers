@@ -420,6 +420,8 @@ func (s *Sandbox) getAndStoreGuestDetails() error {
 		return err
 	}
 
+	s.Logger().WithField("Gest Detail Result: mem block size in Bytes: ", guestDetailRes.MemBlockSizeBytes).Infof("EERNST: Guest Detail results!")
+
 	if guestDetailRes != nil {
 		s.state.GuestMemoryBlockSizeMB = uint32(guestDetailRes.MemBlockSizeBytes >> 20)
 		if guestDetailRes.AgentDetails != nil {
@@ -1885,8 +1887,14 @@ func (s *Sandbox) updateResources() error {
 	sandboxVCPUs += s.hypervisor.hypervisorConfig().NumVCPUs
 
 	sandboxMemoryByte := s.calculateSandboxMemory()
+
+	s.Logger().WithField("sandbox memory", sandboxMemoryByte).Debugf("Calculated memory for sandbox")
+
 	// Add default / rsvd memory for sandbox.
 	sandboxMemoryByte += int64(s.hypervisor.hypervisorConfig().MemorySize) << utils.MibToBytesShift
+
+	s.Logger().WithField("hyperivosr  memory", s.hypervisor.hypervisorConfig().MemorySize<<utils.MibToBytesShift).Debugf("Calculated memory for sandbox + hypervisor default")
+	s.Logger().WithField("total memory", sandboxMemoryByte).Debugf("Calculated memory for sandbox + hypervisor default")
 
 	// Update VCPUs
 	s.Logger().WithField("cpus-sandbox", sandboxVCPUs).Debugf("Request to hypervisor to update vCPUs")
