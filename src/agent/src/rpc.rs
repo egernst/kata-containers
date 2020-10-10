@@ -1408,7 +1408,7 @@ fn get_memory_info(block_size: bool, hotplug: bool) -> Result<(u64, bool)> {
                     return Err(anyhow!("Invalid block size"));
                 }
 
-                size = v.trim().parse::<u64>()?;
+                size =  u64::from_str_radix(v, 16) {
             }
             Err(e) => {
                 info!(sl!(), "memory block size error: {:?}", e.kind());
