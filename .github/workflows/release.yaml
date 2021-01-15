@@ -44,7 +44,7 @@ jobs:
            echo "artifact-built=false" >> $GITHUB_ENV
          fi
       - name: store-artifacts
-        if: $artifact-built == 'true'
+        if: ${artifact-built} == 'true'
         uses: actions/upload-artifact@v2
         with:
           name: kata-artifacts
@@ -72,7 +72,7 @@ jobs:
            echo "artifact-built=false" >> $GITHUB_ENV
          fi
       - name: store-artifacts
-        if: $artifact-built == 'true'
+        if: ${artifact-built} == 'true'
         uses: actions/upload-artifact@v2
         with:
           name: kata-artifacts
@@ -98,7 +98,7 @@ jobs:
            echo "artifact-built=false" >> $GITHUB_ENV
          fi
       - name: store-artifacts
-        if: $artifact-built == 'true'
+        if: ${artifact-built} == 'true'
         uses: actions/upload-artifact@v2
         with:
           name: kata-artifacts
@@ -124,7 +124,7 @@ jobs:
            echo "artifact-built=false" >> $GITHUB_ENV
          fi
       - name: store-artifacts
-        if: $artifact-built == 'true'
+        if: ${artifact-built} == 'true'
         uses: actions/upload-artifact@v2
         with:
           name: kata-artifacts
@@ -150,7 +150,7 @@ jobs:
            echo "artifact-built=false" >> $GITHUB_ENV
          fi
       - name: store-artifacts
-        if: artifact-built == 'true'
+        if: {artifact-built} == 'true'
         uses: actions/upload-artifact@v2
         with:
           name: kata-artifacts
@@ -176,7 +176,7 @@ jobs:
            echo "artifact-built=false" >> $GITHUB_ENV
          fi
       - name: store-artifacts
-        if: $artifact-built == 'true'
+        if: ${artifact-built} == 'true'
         uses: actions/upload-artifact@v2
         with:
           name: kata-artifacts
@@ -203,7 +203,7 @@ jobs:
            echo "artifact-built=false" >> $GITHUB_ENV
          fi
       - name: store-artifacts
-        if: $artifact-built == 'true'
+        if: ${artifact-built} == 'true'
         uses: actions/upload-artifact@v2
         with:
           name: kata-artifacts
@@ -229,7 +229,7 @@ jobs:
            echo "artifact-built=false" >> $GITHUB_ENV
          fi
       - name: store-artifacts
-        if: $artifact-built == 'true'
+        if: ${artifact-built} == 'true'
         uses: actions/upload-artifact@v2
         with:
           name: kata-artifacts
@@ -274,7 +274,7 @@ jobs:
           mv kata-static.tar.xz $GITHUB_WORKSPACE/tools/packaging/kata-deploy/kata-static.tar.xz
           docker build --build-arg KATA_ARTIFACTS=kata-static.tar.xz -t katadocker/kata-deploy-ci:$pkg_sha $GITHUB_WORKSPACE/tools/packaging/kata-deploy
           docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-          docker push katadocker/kata-deploy-ci:$pkg_sha
+          docker push katadocker/kata-deploy-ci-ee:$pkg_sha
           mkdir -p packaging/kata-deploy
           ln -s $GITHUB_WORKSPACE/tools/packaging/kata-deploy/action packaging/kata-deploy/action
           echo "::set-output name=PKG_SHA::${pkg_sha}"
@@ -292,7 +292,7 @@ jobs:
         run: |
           # tag the container image we created and push to DockerHub
           tag=$(echo $GITHUB_REF | cut -d/ -f3-)
-          docker tag katadocker/kata-deploy-ci:${{steps.build-and-push-kata-deploy-ci.outputs.PKG_SHA}} katadocker/kata-deploy:${tag}
+          docker tag katadocker/kata-deploy-ci:${{steps.build-and-push-kata-deploy-ci.outputs.PKG_SHA}} katadocker/kata-deploy-ee:${tag}
           docker push katadocker/kata-deploy:${tag}
 
   upload-static-tarball:
@@ -309,11 +309,11 @@ jobs:
           HUB_VER=$(curl -s "https://api.github.com/repos/github/hub/releases/latest" | jq -r .tag_name | sed 's/^v//')
           wget -q -O- https://github.com/github/hub/releases/download/v$HUB_VER/hub-linux-amd64-$HUB_VER.tgz | \
           tar xz --strip-components=2 --wildcards '*/bin/hub' && sudo mv hub /usr/local/bin/hub
-      - name: push static tarball to github
-        run: |
-          tag=$(echo $GITHUB_REF | cut -d/ -f3-)
-          tarball="kata-static-$tag-x86_64.tar.xz"
-          mv kata-static.tar.xz "$GITHUB_WORKSPACE/${tarball}"
-          pushd $GITHUB_WORKSPACE
-          echo "uploading asset '${tarball}' for tag: ${tag}"
-          GITHUB_TOKEN=${{ secrets.GIT_UPLOAD_TOKEN }} hub release edit -m "" -a "${tarball}" "${tag}"
+          #      - name: push static tarball to github
+          #        run: |
+          #          tag=$(echo $GITHUB_REF | cut -d/ -f3-)
+          #          tarball="kata-static-$tag-x86_64.tar.xz"
+          #          mv kata-static.tar.xz "$GITHUB_WORKSPACE/${tarball}"
+          #          pushd $GITHUB_WORKSPACE
+          #          echo "uploading asset '${tarball}' for tag: ${tag}"
+          #          GITHUB_TOKEN=${{ secrets.GIT_UPLOAD_TOKEN }} hub release edit -m "" -a "${tarball}" "${tag}"
