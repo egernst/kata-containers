@@ -272,7 +272,7 @@ jobs:
           pkg_sha=$(git rev-parse HEAD)
           popd
           mv kata-static.tar.xz $GITHUB_WORKSPACE/tools/packaging/kata-deploy/kata-static.tar.xz
-          docker build --build-arg KATA_ARTIFACTS=kata-static.tar.xz -t katadocker/kata-deploy-ci:$pkg_sha $GITHUB_WORKSPACE/tools/packaging/kata-deploy
+          docker build --build-arg KATA_ARTIFACTS=kata-static.tar.xz -t katadocker/kata-deploy-ci-ee:$pkg_sha $GITHUB_WORKSPACE/tools/packaging/kata-deploy
           docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
           docker push katadocker/kata-deploy-ci-ee:$pkg_sha
           mkdir -p packaging/kata-deploy
