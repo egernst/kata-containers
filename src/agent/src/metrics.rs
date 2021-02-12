@@ -493,10 +493,12 @@ fn set_gauge_vec_proc_stat(gv: &prometheus::GaugeVec, stat: &procfs::process::St
 }
 
 pub struct FsStat {
-    free: u64,
-    size: u64,
-    used: u64,
-    status: String,
+    pub free: u64,
+    pub size: u64,
+    pub used: u64,
+    /// Total file nodes
+    pub files: u64,
+    pub status: String,
 }
 
 const OPEN_TIMEOUT_SECS: u64 = 10;
@@ -539,6 +541,7 @@ pub async fn get_volume_stats(mount: &str) -> Result<FsStat> {
         free,
         size,
         used: size - free,
+        files: stat.files(),
         status: match status.await {
             Ok(_) => String::from("ok"),
             Err(err) => err.to_string(),
