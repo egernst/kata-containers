@@ -7,6 +7,7 @@ package containerdshim
 
 import (
 	"context"
+	"encoding/json"
 	"expvar"
 	"fmt"
 	"io"
@@ -99,6 +100,48 @@ func (s *service) serveMetrics(w http.ResponseWriter, r *http.Request) {
 	go s.setPodOverheadMetrics(context.Background())
 }
 
+type FsStatsRequest struct {
+	BlkDevice string `json:"blkDevice,omitempty"`
+}
+
+type FsStatsResponse struct {
+	BlkDevice string `json:"blkDevice,omitempty"`
+	BytesUsed uint   `json:"bytesUsed,omitempty"`
+	IsMounted bool   `json:"isMounted,omitempty"`
+}
+
+func (s *service) getVolumeStats(w http.ResponseWriter, r *http.Request) {
+
+	// From the request, we'll need the block device that we want stats for
+	var req FsStatsRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+	}
+
+	// identify the mount point in the guest associated with this block device
+	status, err := s.sandbox.GetFsStats(req.BlkDevice)
+	if err != nil {
+		//what's the best response here?
+		w.WriteHeader(http.StatusBadRequest)
+	}
+
+	// garbage response for now: wip
+	respData := FsStatsResponse{
+		BlkDevice: status,
+		BytesUsed: 6,
+		IsMounted: true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(respData)
+}
+
+func (s *service) resizeVolume(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprint(w, "get Volume Resource response")
+}
+
 func decodeAgentMetrics(body string) []*dto.MetricFamily {
 	// decode agent metrics
 	reader := strings.NewReader(body)
@@ -153,6 +196,10 @@ func (s *service) startManagementServer(ctx context.Context, ociSpec *specs.Spec
 	m := http.NewServeMux()
 	m.Handle("/metrics", http.HandlerFunc(s.serveMetrics))
 	m.Handle("/agent-url", http.HandlerFunc(s.agentURL))
+
+	m.Handle("/fs-stats", http.HandlerFunc(s.getVolumeStats))
+	m.Handle("/fs-resize", http.HandlerFunc(s.resizeVolume))
+
 	s.mountPprofHandle(m, ociSpec)
 
 	// register shim metrics
