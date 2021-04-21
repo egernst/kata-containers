@@ -207,4 +207,7 @@ type agent interface {
 
 	// getAgentMetrics get metrics of agent and guest through agent
 	getAgentMetrics(context.Context, *grpc.GetMetricsRequest) (*grpc.Metrics, error)
+
+	//// get status and usage stats for a particular filesystem mount point
+	//getFsStats(mntPath string) (*grpc.FsStats, error)
 }
