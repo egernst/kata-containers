@@ -2228,6 +2228,30 @@ func (s *Sandbox) GetAgentURL() (string, error) {
 	return s.agent.getAgentURL()
 }
 
+func (s *Sandbox) GetFsStats(source string) (string, error) {
+
+	// verify the device even exists
+
+	// verify that we have a mount in this sandbox who's source maps to this
+	for _, c := range s.containers {
+		for _, m := range c.mounts {
+			if source != m.Source {
+				continue
+			}
+			/*
+				_, err := s.agent.getFsStats(m.GuestDeviceMount)
+				if err != nil {
+					return "", err
+				}
+			*/
+			return m.GuestDeviceMount, nil
+			break
+		}
+	}
+
+	return "", fmt.Errorf("GetFsStats: mount %s not found")
+}
+
 // getSandboxCPUSet returns the union of each of the sandbox's containers' CPU sets'
 // cpus and mems as a string in canonical linux CPU/mems list format
 func (s *Sandbox) getSandboxCPUSet() (string, string, error) {

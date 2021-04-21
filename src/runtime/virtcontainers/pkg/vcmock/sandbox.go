@@ -236,6 +236,14 @@ func (s *Sandbox) GetAgentMetrics(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+// GetFsStats implements the VCSandbox function of the same name.
+func (s *Sandbox) GetFsStats(source string) (string, error) {
+	if s.GetFsStatsFunc != nil {
+		return s.GetFsStatsFunc()
+	}
+	return "", nil
+}
+
 // Stats implements the VCSandbox function of the same name.
 func (s *Sandbox) Stats(ctx context.Context) (vc.SandboxStats, error) {
 	if s.StatsFunc != nil {
