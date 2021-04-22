@@ -12,6 +12,8 @@ import (
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/egernst/direct-assign-volumes"
 )
 
 func WriteJsonFile(obj interface{}, file string) error {
@@ -64,7 +66,7 @@ func TestUnexpectedJson(t *testing.T) {
 	defer os.Remove(file.Name())
 	defer file.Close()
 
-	m := DiskMountInfo{
+	m := directvolume.DiskMountInfo{
 		Device:     "/dev/loop13",
 		VolumeType: "blk-filesystem",
 		TargetPath: "/configs",
@@ -88,7 +90,7 @@ func TestJson(t *testing.T) {
 	defer os.Remove(file.Name())
 	defer file.Close()
 
-	m := DiskMountInfo{
+	m := directvolume.DiskMountInfo{
 		Device:     "/dev/xda",
 		VolumeType: "blk-filesystem",
 		TargetPath: "/certs",

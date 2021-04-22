@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/egernst/direct-assign-volumes"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/device/config"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/device/manager"
 	vccgroups "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/cgroups"
@@ -680,10 +681,10 @@ func (c *Container) createBlockDevices(ctx context.Context) error {
 		// scenario,a special file will be persent within the mount's source which provides details on where the
 		// backing block device comes from. In this scenario, we ignore the mount on the host, and instead pass
 		// the block device to the VM, and mount it in the guest to provide to the container workload.
-		if _, err := os.Stat(filepath.Join(m.Source, DirectAssignedVolumeJson)); err == nil {
+		if _, err := os.Stat(filepath.Join(m.Source, directvolume.DirectAssignedVolumeJson)); err == nil {
 			c.Logger().Debugf("found direct assigned volume: %s", m.Source)
 
-			directInfo, err := getDirectAssignedDiskMountInfo(filepath.Join(m.Source, DirectAssignedVolumeJson))
+			directInfo, err := getDirectAssignedDiskMountInfo(filepath.Join(m.Source, directvolume.DirectAssignedVolumeJson))
 			if err != nil {
 				c.Logger().WithError(err).Error("direct assigned volume found, but error reading file")
 				return err
