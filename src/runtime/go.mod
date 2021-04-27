@@ -22,7 +22,7 @@ require (
 	github.com/docker/distribution v2.7.1+incompatible // indirect
 	github.com/docker/docker v1.13.1 // indirect
 	github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c // indirect
-	github.com/egernst/direct-assign-volumes v0.0.0-20210422020601-947241a0d6f9
+	github.com/egernst/directvolume v0.0.0-20210422031022-c7c979f6c1d6
 	github.com/go-ini/ini v1.28.2
 	github.com/go-openapi/errors v0.18.0
 	github.com/go-openapi/runtime v0.18.0

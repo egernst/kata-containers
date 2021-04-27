@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/egernst/direct-assign-volumes"
+	"github.com/egernst/directvolume"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/device/config"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/device/manager"
 	vccgroups "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/cgroups"

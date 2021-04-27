@@ -159,9 +159,9 @@ github.com/docker/docker/pkg/stringid
 github.com/docker/go-events
 # github.com/docker/go-units v0.3.3
 github.com/docker/go-units
-# github.com/egernst/direct-assign-volumes v0.0.0-20210422020601-947241a0d6f9
+# github.com/egernst/directvolume v0.0.0-20210422031022-c7c979f6c1d6
 ## explicit
-github.com/egernst/direct-assign-volumes
+github.com/egernst/directvolume
 # github.com/globalsign/mgo v0.0.0-20181015135952-eeefdecb41b8
 github.com/globalsign/mgo/bson
 github.com/globalsign/mgo/internal/json

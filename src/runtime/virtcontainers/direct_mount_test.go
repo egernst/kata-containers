@@ -7,13 +7,14 @@ package virtcontainers
 
 import (
 	"encoding/json"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"os"
 	"reflect"
 	"testing"
 
-	"github.com/egernst/direct-assign-volumes"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/egernst/directvolume"
 )
 
 func WriteJsonFile(obj interface{}, file string) error {

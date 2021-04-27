@@ -10,7 +10,7 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/egernst/direct-assign-volumes"
+	"github.com/egernst/directvolume"
 )
 
 // getDirectAssignedDiskInfo reads the `file` and unmarshalls it to DiskMountInfo
