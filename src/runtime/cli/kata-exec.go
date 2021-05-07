@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"sync"
@@ -178,8 +177,7 @@ func (s *iostream) Read(data []byte) (n int, err error) {
 }
 
 func getConn(sandboxID string, port uint64) (net.Conn, error) {
-	socketAddr := filepath.Join(string(filepath.Separator), "run", "vc", sandboxID, "shim-monitor")
-	client, err := kataMonitor.BuildUnixSocketClient(socketAddr, defaultTimeout)
+	client, err := kataMonitor.BuildShimClient(sandboxID, defaultTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +188,7 @@ func getConn(sandboxID string, port uint64) (net.Conn, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Failed to get %s: %d", socketAddr, resp.StatusCode)
+		return nil, fmt.Errorf("Failure from %s shim-monitor: %d", sandboxID, resp.StatusCode)
 	}
 
 	defer resp.Body.Close()
