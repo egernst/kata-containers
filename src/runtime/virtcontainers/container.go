@@ -547,7 +547,7 @@ func (c *Container) mountSharedDirMounts(ctx context.Context, hostSharedDir, hos
 		}
 
 		// We need to treat /dev/shm as a special case. This is passed as a bind mount in the spec,
-		// but it does not make sense to pass this as a 9p mount from the host side.
+		// but it does not make sense to pass this as a mount from the host side.
 		// This needs to be handled purely in the guest, by allocating memory for this inside the VM.
 		if m.Destination == "/dev/shm" {
 			continue

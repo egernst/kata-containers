@@ -1190,6 +1190,7 @@ func (k *kataAgent) appendVhostUserBlkDevice(dev ContainerDevice, c *Container) 
 	return kataDevice
 }
 
+//TODO: fix up and just update in place instead of returning the append
 func (k *kataAgent) appendDevices(deviceList []*grpc.Device, c *Container) []*grpc.Device {
 	var kataDevice *grpc.Device
 
@@ -1300,6 +1301,142 @@ func (k *kataAgent) buildContainerRootfs(ctx context.Context, sandbox *Sandbox, 
 	return nil, nil
 }
 
+func (k *kataAgent) handleMounts(ctx context.Context, spec *specs.Spec, c *Container) ([]*grpc.Storage, error) {
+
+	var ctrStorages []*grpc.Storage
+	newMounts, ignoredMounts, err := c.mountSharedDirMounts(ctx, getSharePath(c.sandboxID), getMountPath(c.sandboxID), kataGuestSharedDir())
+	if err != nil {
+		return nil, err
+	}
+
+	k.handleShm(spec.Mounts, c.sandbox)
+
+	epheStorages, err := k.handleEphemeralStorage(spec.Mounts)
+	if err != nil {
+		return nil, err
+	}
+
+	localStorages, err := k.handleLocalStorage(spec.Mounts, sandbox.id, c.rootfsSuffix)
+	if err != nil {
+		return nil, err
+	}
+
+	// We replace all OCI mount sources that match our container mount
+	// with the right source path (the guest one).
+	if err = k.replaceOCIMountSource(spec, newMounts); err != nil {
+		return nil, err
+	}
+
+	// Remove all mounts that should be ignored from the spec
+	if err = k.removeIgnoredOCIMount(spec, ignoredMounts); err != nil {
+		return nil, err
+	}
+
+	// Handle all the volumes that are block device files.
+	// Note this call modifies the list of container devices to make sure
+	// all hotplugged devices are unplugged, so this needs be done
+	// after devices passed with --device are handled.
+	volumeStorages, err := k.handleBlockVolumes(c)
+	if err != nil {
+		return nil, err
+	}
+
+	// note -- this is specific to the block devices, which need explicit mounting
+	if err := k.replaceOCIMountsForStorages(ociSpec, volumeStorages); err != nil {
+		return nil, err
+	}
+
+	ctrStorages = append(ctrStorages, volumeStorages...)
+
+	return nil, nil
+}
+
+func (k *kataAgent) handleBlockMount(ctx context.Context, spec *specs.Spec, mount Mount, c *Container) (*grpc.Storage, error) {
+	k.Logger().Info("handling block device")
+
+	// attach this block device; all other dievces passedin the config have been attached at this point <?>
+	if err = c.sandbox.devManager.AttachDevice(ctx, m.BlockDeviceID, c.sandbox); err != nil {
+		return nil, nil, err
+	}
+	//TODO: how is this handled when any other part of mount handling fails - don't we exit the whole sandbox anyway?
+	//devicesToDetach = append(devicesToDetach, m.BlockDeviceID)
+
+	// Add the block device to the list of container devices, to make sure the
+	// device is detached with detachDevices() for a container.
+	c.devices = append(c.devices, ContainerDevice{ID: id, ContainerPath: m.Destination})
+
+	//Attach device creates the whole gRPC struct i guess. now that we attached, let's get the details on it so we can create the gRPC storage device:
+
+	var vol *grpc.Storage
+
+	device := c.sandbox.devManager.GetDeviceByID(id)
+	if device == nil {
+		k.Logger().WithField("device", id).Error("failed to find device by id")
+		return nil, fmt.Errorf("Failed to find device by id (id=%s)", id)
+	}
+
+	var err error
+	switch device.DeviceType() {
+	case config.DeviceBlock:
+		vol, err = k.handleDeviceBlockVolume(c, m, device)
+	case config.VhostUserBlk:
+		vol, err = k.handleVhostUserBlkVolume(c, m, device)
+	default:
+		k.Logger().Error("Unknown device type")
+	}
+	if vol == nil || err != nil {
+		return nil, err
+	}
+
+	// and now, let's go ahead and update the spec based on this new source
+
+	return nil, nil
+}
+
+func (k *kataAgent) myHandleMounts(ctx context.Context, spec *specs.Spec, c *Container) ([]*grpc.Storage, error) {
+	var ctrStorages []*grpc.Storage
+
+	for idx, m := range c.mounts {
+		// We handle several different kinds of mounts: block, memory backed, local-backed, shm, sharedfs bindmount. Let's go through it!
+		var storage *grpc.Storage
+
+		// Skip mounting certain system paths from the source on the host side
+		// into the container as it does not make sense to do so.
+		// Example sources could be /sys/fs/cgroup etc.
+		if isSystemMount(m.Source) {
+			continue
+		}
+
+		switch m.Type {
+		case KataEphemeralDevType:
+			k.Logger().Info("handleEphemeralDev(")
+		case KataLocalDevType:
+			k.Logger().Info("handleEphemeralDev(")
+		case "bind":
+			k.Logger().Info("handling a bind mount -- could be block, shm or sharedfs")
+			if len(m.BlockDeviceID) > 0 {
+				storage = k.handleBlockMount(ctx, spec, m, c)
+
+			} else if m.Destination == "/dev/shm" {
+				k.Logger().Info("handling shm")
+				//storage = handleShmMount(spec, c)
+			} else {
+				// this is a sharedFS based volume
+				k.Logger().Info("handling shm")
+				//storage = handleSharedFsMount(spec, c)
+			}
+		default:
+			k.Logger().Error("unknown mount type")
+			continue
+		}
+
+		// append storage
+		ctrStorages = append(ctrStorages, storage)
+	}
+
+	return ctrStorages, nil
+}
+
 func (k *kataAgent) createContainer(ctx context.Context, sandbox *Sandbox, c *Container) (p *Process, err error) {
 	span, ctx := k.trace(ctx, "createContainer")
 	defer span.End()
@@ -1340,57 +1477,78 @@ func (k *kataAgent) createContainer(ctx context.Context, sandbox *Sandbox, c *Co
 	if ociSpec == nil {
 		return nil, errorMissingOCISpec
 	}
+	///// START MOUNT HANDLING -- this should be its own function
 
-	// Handle container mounts
-	newMounts, ignoredMounts, err := c.mountSharedDirMounts(ctx, getSharePath(sandbox.id), getMountPath(sandbox.id), kataGuestSharedDir())
+	mountStorages, err := k.myHandleMounts(ctx, ociSpec, c)
 	if err != nil {
 		return nil, err
 	}
+	ctrStorages = append(ctrSorages, mountStorages...)
+	/*
+		// Handle container mounts
 
-	k.handleShm(ociSpec.Mounts, sandbox)
+		// This function will create appropriate storage objects, do things and stuff like that
+		mountStorages, err := k.handleMounts(ctx, ociSpec, c)
+		ctrStorages = append(ctrStorages, mountStorages...)
+		if err != nil {
+			return nil, err
+		}
 
-	epheStorages, err := k.handleEphemeralStorage(ociSpec.Mounts)
-	if err != nil {
-		return nil, err
-	}
+		newMounts, ignoredMounts, err := c.mountSharedDirMounts(ctx, getSharePath(sandbox.id), getMountPath(sandbox.id), kataGuestSharedDir())
+		if err != nil {
+			return nil, err
+		}
 
-	ctrStorages = append(ctrStorages, epheStorages...)
+		k.handleShm(ociSpec.Mounts, sandbox)
 
-	localStorages, err := k.handleLocalStorage(ociSpec.Mounts, sandbox.id, c.rootfsSuffix)
-	if err != nil {
-		return nil, err
-	}
+		epheStorages, err := k.handleEphemeralStorage(ociSpec.Mounts)
+		if err != nil {
+			return nil, err
+		}
 
-	ctrStorages = append(ctrStorages, localStorages...)
+		ctrStorages = append(ctrStorages, epheStorages...)
 
-	// We replace all OCI mount sources that match our container mount
-	// with the right source path (The guest one).
-	if err = k.replaceOCIMountSource(ociSpec, newMounts); err != nil {
-		return nil, err
-	}
+		localStorages, err := k.handleLocalStorage(ociSpec.Mounts, sandbox.id, c.rootfsSuffix)
+		if err != nil {
+			return nil, err
+		}
+		ctrStorages = append(ctrStorages, localStorages...)
 
-	// Remove all mounts that should be ignored from the spec
-	if err = k.removeIgnoredOCIMount(ociSpec, ignoredMounts); err != nil {
-		return nil, err
-	}
+		watchableStorages, err := k.handleWatchableStorage()
+		if err != nil {
+			return nil, err
+		}
+		ctrStorages = append(ctrStorages, watchableStorages...)
 
+		// We replace all OCI mount sources that match our container mount
+		// with the right source path (the guest one).
+		if err = k.replaceOCIMountSource(ociSpec, newMounts); err != nil {
+			return nil, err
+		}
+
+		// Remove all mounts that should be ignored from the spec
+		if err = k.removeIgnoredOCIMount(ociSpec, ignoredMounts); err != nil {
+			return nil, err
+		}
+
+		// Handle all the volumes that are block device files.
+		// Note this call modifies the list of container devices to make sure
+		// all hotplugged devices are unplugged, so this needs be done
+		// after devices passed with --device are handled.
+		volumeStorages, err := k.handleBlockVolumes(c)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := k.replaceOCIMountsForStorages(ociSpec, volumeStorages); err != nil {
+			return nil, err
+		}
+		ctrStorages = append(ctrStorages, volumeStorages...)
+		////END MOUNT HANDLING
+	*/
+	//this one is kinda fucked up -- should we just mutate what is provided?
 	// Append container devices for block devices passed with --device.
 	ctrDevices = k.appendDevices(ctrDevices, c)
-
-	// Handle all the volumes that are block device files.
-	// Note this call modifies the list of container devices to make sure
-	// all hotplugged devices are unplugged, so this needs be done
-	// after devices passed with --device are handled.
-	volumeStorages, err := k.handleBlockVolumes(c)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := k.replaceOCIMountsForStorages(ociSpec, volumeStorages); err != nil {
-		return nil, err
-	}
-
-	ctrStorages = append(ctrStorages, volumeStorages...)
 
 	grpcSpec, err := grpc.OCItoGRPC(ociSpec)
 	if err != nil {
