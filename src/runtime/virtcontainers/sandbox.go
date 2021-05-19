@@ -677,13 +677,15 @@ func (s *Sandbox) removeContainer(containerID string) error {
 // Delete deletes an already created sandbox.
 // The VM in which the sandbox is running will be shut down.
 func (s *Sandbox) Delete(ctx context.Context) error {
+	s.Logger().Error("EGE: Delete()!")
 	if s.state.State != types.StateReady &&
 		s.state.State != types.StatePaused &&
 		s.state.State != types.StateStopped {
-		return fmt.Errorf("Sandbox not ready, paused or stopped, impossible to delete")
+		return fmt.Errorf("Sandbox not ready, paused or stopped, impossible to .delete")
 	}
 
 	for _, c := range s.containers {
+		s.Logger().Error("EGE: Deleting a container...!")
 		if err := c.delete(ctx); err != nil {
 			s.Logger().WithError(err).WithField("cid", c.id).Debug("failed to delete container")
 		}
@@ -703,8 +705,10 @@ func (s *Sandbox) Delete(ctx context.Context) error {
 		s.Logger().WithError(err).Error("failed to cleanup hypervisor")
 	}
 
+	s.Logger().Error("EGE: Cleaning up the agent...!")
 	s.agent.cleanup(ctx, s)
 
+	s.Logger().Error("EGE: Done!")
 	return s.store.Destroy(s.id)
 }
 
@@ -994,7 +998,7 @@ func (s *Sandbox) startVM(ctx context.Context) (err error) {
 	span, ctx := s.trace(ctx, "startVM")
 	defer span.End()
 
-	s.Logger().Info("Starting VM")
+	s.Logger().Debug("EGEStarting VM")
 
 	if s.config.HypervisorConfig.Debug {
 		// create console watcher
@@ -1019,6 +1023,7 @@ func (s *Sandbox) startVM(ctx context.Context) (err error) {
 			return vm.assignSandbox(s)
 		}
 
+		s.Logger().Debug("EGE: Hmm: VM started")
 		return s.hypervisor.startSandbox(ctx, vmStartTimeout)
 	}); err != nil {
 		return err
@@ -1029,6 +1034,8 @@ func (s *Sandbox) startVM(ctx context.Context) (err error) {
 			s.hypervisor.stopSandbox(ctx, false)
 		}
 	}()
+
+	s.Logger().Info("EGE: VM started")
 
 	// In case of vm factory, network interfaces are hotplugged
 	// after vm is started.

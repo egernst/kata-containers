@@ -70,6 +70,7 @@ func createSandboxFromConfig(ctx context.Context, sandboxConfig SandboxConfig, f
 	// cleanup sandbox resources in case of any failure
 	defer func() {
 		if err != nil {
+			s.Logger().Errorf("EGE: Need to cleanup sandbox resources becuase of failure\n")
 			s.Delete(ctx)
 		}
 	}()
