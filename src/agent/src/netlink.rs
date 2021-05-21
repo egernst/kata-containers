@@ -1,4 +1,4 @@
-// Copyright (c) 2021 Kata Maintainers
+// Copyright (c) 2021 Apple Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
