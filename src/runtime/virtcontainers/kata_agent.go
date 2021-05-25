@@ -963,65 +963,6 @@ func (k *kataAgent) stopSandbox(ctx context.Context, sandbox *Sandbox) error {
 	return nil
 }
 
-func (k *kataAgent) replaceOCIMountSource(spec *specs.Spec, guestMounts map[string]Mount) error {
-	ociMounts := spec.Mounts
-
-	for index, m := range ociMounts {
-		if guestMount, ok := guestMounts[m.Destination]; ok {
-			k.Logger().Debugf("Replacing OCI mount (%s) source %s with %s", m.Destination, m.Source, guestMount.Source)
-			ociMounts[index].Source = guestMount.Source
-		}
-	}
-
-	return nil
-}
-
-func (k *kataAgent) removeIgnoredOCIMount(spec *specs.Spec, ignoredMounts map[string]Mount) error {
-	var mounts []specs.Mount
-
-	for _, m := range spec.Mounts {
-		if _, found := ignoredMounts[m.Source]; found {
-			k.Logger().WithField("removed-mount", m.Source).Debug("Removing OCI mount")
-		} else {
-			mounts = append(mounts, m)
-		}
-	}
-
-	// Replace the OCI mounts with the updated list.
-	spec.Mounts = mounts
-
-	return nil
-}
-
-func (k *kataAgent) replaceOCIMountsForStorages(spec *specs.Spec, volumeStorages []*grpc.Storage) error {
-	ociMounts := spec.Mounts
-	var index int
-	var m specs.Mount
-
-	for i, v := range volumeStorages {
-		for index, m = range ociMounts {
-			if m.Destination != v.MountPoint {
-				continue
-			}
-
-			// Create a temporary location to mount the Storage. Mounting to the correct location
-			// will be handled by the OCI mount structure.
-			filename := fmt.Sprintf("%s-%s", uuid.Generate().String(), filepath.Base(m.Destination))
-			path := filepath.Join(kataGuestSandboxStorageDir(), filename)
-
-			k.Logger().Debugf("Replacing OCI mount source (%s) with %s", m.Source, path)
-			ociMounts[index].Source = path
-			volumeStorages[i].MountPoint = path
-
-			break
-		}
-		if index == len(ociMounts) {
-			return fmt.Errorf("OCI mount not found for block volume %s", v.MountPoint)
-		}
-	}
-	return nil
-}
-
 func (k *kataAgent) constraintGRPCSpec(grpcSpec *grpc.Spec, passSeccomp bool) {
 	// Disable Hooks since they have been handled on the host and there is
 	// no reason to send them to the agent. It would make no sense to try
@@ -1098,34 +1039,29 @@ func (k *kataAgent) constraintGRPCSpec(grpcSpec *grpc.Spec, passSeccomp bool) {
 	grpcSpec.Linux.Devices = linuxDevices
 }
 
-func (k *kataAgent) handleShm(mounts []specs.Mount, sandbox *Sandbox) {
-	for idx, mnt := range mounts {
-		if mnt.Destination != "/dev/shm" {
-			continue
-		}
+func (k *kataAgent) myHandleShm(mount *specs.Mount, sandbox *Sandbox) {
+	if mount.Destination != "/dev/shm" {
+		return
+	}
 
-		// If /dev/shm for a container is backed by an ephemeral volume, skip
-		// bind-mounting it to the sandbox shm.
-		// A later call to handleEphemeralStorage should take care of setting up /dev/shm correctly.
-		if mnt.Type == KataEphemeralDevType {
-			continue
-		}
+	if mount.Type == KataEphemeralDevType {
+		return
+	}
 
-		// A container shm mount is shared with sandbox shm mount.
-		if sandbox.shmSize > 0 {
-			mounts[idx].Type = "bind"
-			mounts[idx].Options = []string{"rbind"}
-			mounts[idx].Source = filepath.Join(kataGuestSandboxDir(), shmDir)
-			k.Logger().WithField("shm-size", sandbox.shmSize).Info("Using sandbox shm")
-		} else {
-			// This should typically not happen, as a sandbox shm mount is always set up by the
-			// upper stack.
-			sizeOption := fmt.Sprintf("size=%d", DefaultShmSize)
-			mounts[idx].Type = "tmpfs"
-			mounts[idx].Source = "shm"
-			mounts[idx].Options = []string{"noexec", "nosuid", "nodev", "mode=1777", sizeOption}
-			k.Logger().WithField("shm-size", sizeOption).Info("Setting up a separate shm for container")
-		}
+	// A container shm mount is shared with sandbox shm mount.
+	if sandbox.shmSize > 0 {
+		mount.Type = "bind"
+		mount.Options = []string{"rbind"}
+		mount.Source = filepath.Join(kataGuestSandboxDir(), shmDir)
+		k.Logger().WithField("shm-size", sandbox.shmSize).Info("Using sandbox shm")
+	} else {
+		// This should typically not happen, as a sandbox shm mount is always set up by the
+		// upper stack.
+		sizeOption := fmt.Sprintf("size=%d", DefaultShmSize)
+		mount.Type = "tmpfs"
+		mount.Source = "shm"
+		mount.Options = []string{"noexec", "nosuid", "nodev", "mode=1777", sizeOption}
+		k.Logger().WithField("shm-size", sizeOption).Info("Setting up a separate shm for container")
 	}
 }
 
@@ -1190,7 +1126,6 @@ func (k *kataAgent) appendVhostUserBlkDevice(dev ContainerDevice, c *Container) 
 	return kataDevice
 }
 
-//TODO: fix up and just update in place instead of returning the append
 func (k *kataAgent) appendDevices(deviceList []*grpc.Device, c *Container) []*grpc.Device {
 	var kataDevice *grpc.Device
 
@@ -1301,56 +1236,156 @@ func (k *kataAgent) buildContainerRootfs(ctx context.Context, sandbox *Sandbox, 
 	return nil, nil
 }
 
-func (k *kataAgent) handleBlockMount(ctx context.Context, spec *specs.Spec, mount *Mount, c *Container) (*grpc.Storage, error) {
-	k.Logger().Info("handling block device")
+func (k *kataAgent) handleSharedFsMount(ctx context.Context, mount *Mount, spec *specs.Spec, c *Container, updatedMounts map[string]Mount, ignoredMounts map[string]Mount) (*grpc.Storage, error) {
 
-	id := mount.BlockDeviceID
-	// attach this block device; all other dievces passedin the config have been attached at this point <?>
-	if err := c.sandbox.devManager.AttachDevice(ctx, id, c.sandbox); err != nil {
+	var storage grpc.Storage
+
+	if mount.Type != "bind" || isSystemMount(mount.Source) || mount.Destination == "/dev/shm" || len(mount.BlockDeviceID) > 0 || isHostDevice(mount.Destination) {
+		return nil, nil
+	}
+
+	guestDest, ignore, err := c.shareFiles(ctx, mount)
+	if err != nil {
 		return nil, err
 	}
-	//TODO: how is this handled when any other part of mount handling fails - don't we exit the whole sandbox anyway?
-	//devicesToDetach = append(devicesToDetach, m.BlockDeviceID)
+
+	if ignore {
+		ignoredMounts[mount.Source] = Mount{Source: mount.Source}
+		return nil, nil
+	}
+
+	updatedMounts[mount.Destination] = Mount{Source: guestDest}
+
+	return &storage, nil
+}
+
+// handleBlockMount - for a given block mount, add it to the container's device manager, note the mount update needed in the updateMounts
+// map, and return a storage object
+func (k *kataAgent) handleBlockMount(ctx context.Context, mount *Mount, c *Container, updatedMounts map[string]Mount) (*grpc.Storage, error) {
+	k.Logger().Info("handling block device")
+
+	var storage *grpc.Storage
+	var err error
+
+	id := mount.BlockDeviceID
+	// attach this block device; all other devices passed in the config have been attached at this point
+	if err = c.sandbox.devManager.AttachDevice(ctx, id, c.sandbox); err != nil {
+		return nil, err
+	}
 
 	// Add the block device to the list of container devices, to make sure the
 	// device is detached with detachDevices() for a container.
 	c.devices = append(c.devices, ContainerDevice{ID: id, ContainerPath: mount.Destination})
 
-	//Attach device creates the whole gRPC struct i guess. now that we attached, let's get the details on it so we can create the gRPC storage device:
-
-	var vol *grpc.Storage
 	device := c.sandbox.devManager.GetDeviceByID(id)
 	if device == nil {
 		k.Logger().WithField("device", id).Error("failed to find device by id")
 		return nil, fmt.Errorf("Failed to find device by id (id=%s)", id)
 	}
 
-	var err error
 	switch device.DeviceType() {
 	case config.DeviceBlock:
-		vol, err = k.handleDeviceBlockVolume(c, *mount, device)
+		storage, err = k.handleDeviceBlockVolume(c, *mount, device)
 	case config.VhostUserBlk:
-		vol, err = k.handleVhostUserBlkVolume(c, *mount, device)
+		storage, err = k.handleVhostUserBlkVolume(c, *mount, device)
 	default:
 		k.Logger().Error("Unknown device type")
 	}
-	if vol == nil || err != nil {
+	if storage == nil || err != nil {
 		return nil, err
 	}
 
-	// and now, let's go ahead and update the spec based on this new source
+	// Create a unique temporary location to mount the Storage. We'll need to update the gRPC storage object's mountpoint
+	// as well as the OCI spec's mounts' source.
+	filename := fmt.Sprintf("%s-%s", uuid.Generate().String(), filepath.Base(mount.Destination))
+	path := filepath.Join(kataGuestSandboxStorageDir(), filename)
+	storage.MountPoint = path
+	updatedMounts[mount.Destination] = Mount{Source: path}
 
-	return nil, nil
+	return storage, nil
 }
 
-func (k *kataAgent) handleEphemeralDevMount(ctx context.Context, spec *specs.Spec, mount *Mount, c *Container) (*grpc.Storage, error) {
-	return nil, nil
+func (k *kataAgent) handleLocalMount(mount *specs.Mount, c *Container) (*grpc.Storage, error) {
+	var storage grpc.Storage
+	if mount.Type == KataLocalDevType {
+		stat := syscall.Stat_t{}
+		err := syscall.Stat(mount.Source, &stat)
+		if err != nil {
+			k.Logger().WithError(err).Errorf("failed to stat %s", mount.Source)
+			return nil, err
+		}
+
+		dir_options := localDirOptions
+
+		// if volume's gid isn't root group(default group), this means there's
+		// an specific fsGroup is set on this local volume, then it should pass
+		// to guest.
+		if stat.Gid != 0 {
+			dir_options = append(dir_options, fmt.Sprintf("%s=%d", fsGid, stat.Gid))
+		}
+
+		// Set the mount source path to a the desired directory point in the VM.
+		// In this case it is located in the sandbox directory.
+		// We rely on the fact that the first container in the VM has the same ID as the sandbox ID.
+		// In Kubernetes, this is usually the pause container and we depend on it existing for
+		// local directories to work.
+		mount.Source = filepath.Join(kataGuestSharedDir(), c.sandboxID, c.rootfsSuffix, KataLocalDevType, filepath.Base(mount.Source))
+
+		// Create a storage struct so that the kata agent is able to create the
+		// directory appropriately inside the VM.
+		storage.Driver = KataLocalDevType
+		storage.Source = KataLocalDevType
+		storage.Fstype = KataLocalDevType
+		storage.MountPoint = mount.Source
+		storage.Options = dir_options
+	}
+
+	return &storage, nil
+}
+
+func (k *kataAgent) handleEphemeralDevMount(mount *specs.Mount) (*grpc.Storage, error) {
+	var storage grpc.Storage
+
+	if mount.Type == KataEphemeralDevType {
+		stat := syscall.Stat_t{}
+		err := syscall.Stat(mount.Source, &stat)
+		if err != nil {
+			k.Logger().WithError(err).Errorf("failed to stat %s", mount.Source)
+			return nil, err
+		}
+		var dir_options []string
+
+		// if volume's gid isn't root group(default group), this means there's
+		// an specific fsGroup is set on this local volume, then it should pass
+		// to guest.
+		if stat.Gid != 0 {
+			dir_options = append(dir_options, fmt.Sprintf("%s=%d", fsGid, stat.Gid))
+		}
+
+		// update the mounts source and type
+		mount.Source = filepath.Join(ephemeralPath(), filepath.Base(mount.Source))
+		mount.Type = "bind"
+
+		storage.Driver = KataEphemeralDevType
+		storage.Source = "tmpfs"
+		storage.Fstype = "tmpfs"
+		storage.MountPoint = mount.Source
+		storage.Options = dir_options
+	}
+
+	return &storage, nil
 }
 
 func (k *kataAgent) myHandleMounts(ctx context.Context, spec *specs.Spec, c *Container) ([]*grpc.Storage, error) {
 	var ctrStorages []*grpc.Storage
 
-	// We handle several different kinds of mounts: block, memory backed, local-backed, shm, sharedfs bindmount. Let's go through it!
+	// We may be updating and/or dropped mount fields from the OCI spec:
+	var updatedMounts = make(map[string]Mount)
+	var ignoredMounts = make(map[string]Mount)
+	var err error
+	// First, loop through the container mount structures, handling block devices and other bind mounts. For these,
+	// we'll create storage objects which'll be used by the agent, as well as tracking any changes we'll need to make
+	// to the OCI spec's mounts:
 	for idx, m := range c.mounts {
 		var storage *grpc.Storage
 
@@ -1363,18 +1398,23 @@ func (k *kataAgent) myHandleMounts(ctx context.Context, spec *specs.Spec, c *Con
 
 		switch m.Type {
 		case KataEphemeralDevType:
-			k.handleEphemeralDevMount(ctx, spec, &c.mounts[idx], c)
-			k.Logger().Info("handleEphemeralDev(")
+			continue // handle as we loop over spec
 		case KataLocalDevType:
-			k.Logger().Info("handleEphemeralDev(")
+			continue // handle as we loop over spec
 		case "bind":
 			k.Logger().Info("handling a bind mount -- could be block, shm or sharedfs")
 			if len(m.BlockDeviceID) > 0 {
-				storage, _ = k.handleBlockMount(ctx, spec, &c.mounts[idx], c)
+				storage, err = k.handleBlockMount(ctx, &c.mounts[idx], c, updatedMounts)
+				if err != nil {
+					return nil, err
+				}
 			} else {
 				// this is a sharedFS based volume
 				k.Logger().Info("handling shared fs")
-				//storage = handleSharedFsMount(spec, c)
+				storage, err = k.handleSharedFsMount(ctx, &c.mounts[idx], spec, c, updatedMounts, ignoredMounts)
+				if err != nil {
+					return nil, err
+				}
 			}
 		default:
 			k.Logger().Error("unknown mount type")
@@ -1385,8 +1425,54 @@ func (k *kataAgent) myHandleMounts(ctx context.Context, spec *specs.Spec, c *Con
 		ctrStorages = append(ctrStorages, storage)
 	}
 
-	// Update the OCI Spec for shm based mounts
-	k.handleShm(spec.Mounts, c.sandbox)
+	// Update the OCI spec's mounts field. We'll create a new slice of mounts
+	// which we'll populate with updated fields based on the existing OCI spec and
+	// what we discovered while working through the container's mounts.
+	var finalSpecMounts []specs.Mount
+
+	for _, m := range spec.Mounts {
+
+		// Drop ignored mounts:
+		if _, found := ignoredMounts[m.Source]; found {
+			continue
+		}
+
+		switch m.Type {
+		case KataEphemeralDevType:
+			storage, err := k.handleEphemeralDevMount(&m)
+			if err != err {
+				return nil, err
+			}
+			ctrStorages = append(ctrStorages, storage)
+			finalSpecMounts = append(finalSpecMounts, m)
+
+		case KataLocalDevType:
+			storage, err := k.handleLocalMount(&m, c)
+			if err != err {
+				return nil, err
+			}
+			ctrStorages = append(ctrStorages, storage)
+			finalSpecMounts = append(finalSpecMounts, m)
+
+		case "bind":
+			// Handle /dev/shm case:
+			k.myHandleShm(&m, c.sandbox)
+
+			// If there's an update for this particular mount, make sure we
+			// update the mount's source
+			if updatedMount, ok := updatedMounts[m.Destination]; ok {
+				k.Logger().Debugf("Replacing OCI mount (%s) source %s with %s", m.Destination, m.Source, updatedMount.Source)
+				m.Source = updatedMount.Source
+			}
+			finalSpecMounts = append(finalSpecMounts, m)
+
+		default:
+			k.Logger().Error("unknown mount type")
+		}
+	}
+
+	// update the spec to utilize our new mounts:
+	spec.Mounts = finalSpecMounts
 
 	return ctrStorages, nil
 }
@@ -1431,78 +1517,15 @@ func (k *kataAgent) createContainer(ctx context.Context, sandbox *Sandbox, c *Co
 	if ociSpec == nil {
 		return nil, errorMissingOCISpec
 	}
-	///// START MOUNT HANDLING -- this should be its own function
 
+	// This will mutate the ociSpec's mounts as well as the container's mounts in order to take the updated
+	// source/destination into acccount
 	mountStorages, err := k.myHandleMounts(ctx, ociSpec, c)
 	if err != nil {
 		return nil, err
 	}
 	ctrStorages = append(ctrStorages, mountStorages...)
 
-	/*
-		// Handle container mounts
-
-		// This function will create appropriate storage objects, do things and stuff like that
-		mountStorages, err := k.handleMounts(ctx, ociSpec, c)
-		ctrStorages = append(ctrStorages, mountStorages...)
-		if err != nil {
-			return nil, err
-		}
-
-		newMounts, ignoredMounts, err := c.mountSharedDirMounts(ctx, getSharePath(sandbox.id), getMountPath(sandbox.id), kataGuestSharedDir())
-		if err != nil {
-			return nil, err
-		}
-
-		k.handleShm(ociSpec.Mounts, sandbox)
-
-		epheStorages, err := k.handleEphemeralStorage(ociSpec.Mounts)
-		if err != nil {
-			return nil, err
-		}
-
-		ctrStorages = append(ctrStorages, epheStorages...)
-
-		localStorages, err := k.handleLocalStorage(ociSpec.Mounts, sandbox.id, c.rootfsSuffix)
-		if err != nil {
-			return nil, err
-		}
-		ctrStorages = append(ctrStorages, localStorages...)
-
-		watchableStorages, err := k.handleWatchableStorage()
-		if err != nil {
-			return nil, err
-		}
-		ctrStorages = append(ctrStorages, watchableStorages...)
-
-		// We replace all OCI mount sources that match our container mount
-		// with the right source path (the guest one).
-		if err = k.replaceOCIMountSource(ociSpec, newMounts); err != nil {
-			return nil, err
-		}
-
-		// Remove all mounts that should be ignored from the spec
-		if err = k.removeIgnoredOCIMount(ociSpec, ignoredMounts); err != nil {
-			return nil, err
-		}
-
-		// Handle all the volumes that are block device files.
-		// Note this call modifies the list of container devices to make sure
-		// all hotplugged devices are unplugged, so this needs be done
-		// after devices passed with --device are handled.
-		volumeStorages, err := k.handleBlockVolumes(c)
-		if err != nil {
-			return nil, err
-		}
-
-		if err := k.replaceOCIMountsForStorages(ociSpec, volumeStorages); err != nil {
-			return nil, err
-		}
-		ctrStorages = append(ctrStorages, volumeStorages...)
-		////END MOUNT HANDLING
-	*/
-	//this one is kinda fucked up -- should we just mutate what is provided?
-	// Append container devices for block devices passed with --device.
 	ctrDevices = k.appendDevices(ctrDevices, c)
 
 	grpcSpec, err := grpc.OCItoGRPC(ociSpec)
@@ -1543,94 +1566,6 @@ func buildProcessFromExecID(token string) (*Process, error) {
 		StartTime: time.Now().UTC(),
 		Pid:       -1,
 	}, nil
-}
-
-// handleEphemeralStorage handles ephemeral storages by
-// creating a Storage from corresponding source of the mount point
-func (k *kataAgent) handleEphemeralStorage(mounts []specs.Mount) ([]*grpc.Storage, error) {
-	var epheStorages []*grpc.Storage
-	for idx, mnt := range mounts {
-		if mnt.Type == KataEphemeralDevType {
-			origin_src := mounts[idx].Source
-			stat := syscall.Stat_t{}
-			err := syscall.Stat(origin_src, &stat)
-			if err != nil {
-				k.Logger().WithError(err).Errorf("failed to stat %s", origin_src)
-				return nil, err
-			}
-
-			var dir_options []string
-
-			// if volume's gid isn't root group(default group), this means there's
-			// an specific fsGroup is set on this local volume, then it should pass
-			// to guest.
-			if stat.Gid != 0 {
-				dir_options = append(dir_options, fmt.Sprintf("%s=%d", fsGid, stat.Gid))
-			}
-
-			// Set the mount source path to a path that resides inside the VM
-			mounts[idx].Source = filepath.Join(ephemeralPath(), filepath.Base(mnt.Source))
-			// Set the mount type to "bind"
-			mounts[idx].Type = "bind"
-
-			// Create a storage struct so that kata agent is able to create
-			// tmpfs backed volume inside the VM
-			epheStorage := &grpc.Storage{
-				Driver:     KataEphemeralDevType,
-				Source:     "tmpfs",
-				Fstype:     "tmpfs",
-				MountPoint: mounts[idx].Source,
-				Options:    dir_options,
-			}
-			epheStorages = append(epheStorages, epheStorage)
-		}
-	}
-	return epheStorages, nil
-}
-
-// handleLocalStorage handles local storage within the VM
-// by creating a directory in the VM from the source of the mount point.
-func (k *kataAgent) handleLocalStorage(mounts []specs.Mount, sandboxID string, rootfsSuffix string) ([]*grpc.Storage, error) {
-	var localStorages []*grpc.Storage
-	for idx, mnt := range mounts {
-		if mnt.Type == KataLocalDevType {
-			origin_src := mounts[idx].Source
-			stat := syscall.Stat_t{}
-			err := syscall.Stat(origin_src, &stat)
-			if err != nil {
-				k.Logger().WithError(err).Errorf("failed to stat %s", origin_src)
-				return nil, err
-			}
-
-			dir_options := localDirOptions
-
-			// if volume's gid isn't root group(default group), this means there's
-			// an specific fsGroup is set on this local volume, then it should pass
-			// to guest.
-			if stat.Gid != 0 {
-				dir_options = append(dir_options, fmt.Sprintf("%s=%d", fsGid, stat.Gid))
-			}
-
-			// Set the mount source path to a the desired directory point in the VM.
-			// In this case it is located in the sandbox directory.
-			// We rely on the fact that the first container in the VM has the same ID as the sandbox ID.
-			// In Kubernetes, this is usually the pause container and we depend on it existing for
-			// local directories to work.
-			mounts[idx].Source = filepath.Join(kataGuestSharedDir(), sandboxID, rootfsSuffix, KataLocalDevType, filepath.Base(mnt.Source))
-
-			// Create a storage struct so that the kata agent is able to create the
-			// directory inside the VM.
-			localStorage := &grpc.Storage{
-				Driver:     KataLocalDevType,
-				Source:     KataLocalDevType,
-				Fstype:     KataLocalDevType,
-				MountPoint: mounts[idx].Source,
-				Options:    dir_options,
-			}
-			localStorages = append(localStorages, localStorage)
-		}
-	}
-	return localStorages, nil
 }
 
 // handleDeviceBlockVolume handles volume that is block device file

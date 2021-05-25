@@ -182,7 +182,6 @@ func TestKataAgentSendReq(t *testing.T) {
 
 func TestHandleEphemeralStorage(t *testing.T) {
 	k := kataAgent{}
-	var ociMounts []specs.Mount
 	mountSource := "/tmp/mountPoint"
 	os.Mkdir(mountSource, 0755)
 
@@ -191,38 +190,36 @@ func TestHandleEphemeralStorage(t *testing.T) {
 		Source: mountSource,
 	}
 
-	ociMounts = append(ociMounts, mount)
-	epheStorages, err := k.handleEphemeralStorage(ociMounts)
+	epheStorage, err := k.handleEphemeralDevMount(&mount)
 	assert.Nil(t, err)
 
-	epheMountPoint := epheStorages[0].MountPoint
+	epheMountPoint := epheStorage.MountPoint
 	expected := filepath.Join(ephemeralPath(), filepath.Base(mountSource))
 	assert.Equal(t, epheMountPoint, expected,
 		"Ephemeral mount point didn't match: got %s, expecting %s", epheMountPoint, expected)
 }
 
-func TestHandleLocalStorage(t *testing.T) {
+func TestHandleLocalMount(t *testing.T) {
 	k := kataAgent{}
-	var ociMounts []specs.Mount
 	mountSource := "/tmp/mountPoint"
 	os.Mkdir(mountSource, 0755)
 
-	mount := specs.Mount{
+	mount := &specs.Mount{
 		Type:   KataLocalDevType,
 		Source: mountSource,
 	}
 
-	sandboxID := "sandboxid"
-	rootfsSuffix := "rootfs"
+	c := &Container{
+		sandboxID:    "sandboxid",
+		rootfsSuffix: "rootfs",
+	}
 
-	ociMounts = append(ociMounts, mount)
-	localStorages, _ := k.handleLocalStorage(ociMounts, sandboxID, rootfsSuffix)
+	localStorage, err := k.handleLocalMount(mount, c)
+	assert.NoError(t, err)
 
-	assert.NotNil(t, localStorages)
-	assert.Equal(t, len(localStorages), 1)
-
-	localMountPoint := localStorages[0].MountPoint
-	expected := filepath.Join(kataGuestSharedDir(), sandboxID, rootfsSuffix, KataLocalDevType, filepath.Base(mountSource))
+	assert.NotNil(t, localStorage)
+	localMountPoint := localStorage.MountPoint
+	expected := filepath.Join(kataGuestSharedDir(), c.sandboxID, c.rootfsSuffix, KataLocalDevType, filepath.Base(mountSource))
 	assert.Equal(t, localMountPoint, expected)
 }
 
@@ -325,6 +322,176 @@ func TestHandleDeviceBlockVolume(t *testing.T) {
 			"Volume didn't match: got %+v, expecting %+v",
 			vol, test.resultVol)
 	}
+}
+
+func getVDev(devID, pciPath string) api.Device {
+	vPCIPath, _ := vcTypes.PciPathFromString(pciPath)
+	vDev := drivers.NewVhostUserBlkDevice(&config.DeviceInfo{ID: devID})
+	vDev.VhostUserDeviceAttrs = &config.VhostUserDeviceAttrs{PCIPath: vPCIPath}
+
+	return vDev
+}
+
+func getBDev(devID, pciPath string) api.Device {
+	bPCIPath, _ := vcTypes.PciPathFromString(pciPath)
+	bDev := drivers.NewBlockDevice(&config.DeviceInfo{ID: devID})
+	bDev.BlockDrive = &config.BlockDrive{PCIPath: bPCIPath}
+
+	return bDev
+}
+
+func getDDev(devID, pciPath string) api.Device {
+	dPCIPath, _ := vcTypes.PciPathFromString(pciPath)
+	dDev := drivers.NewBlockDevice(&config.DeviceInfo{ID: devID})
+	dDev.BlockDrive = &config.BlockDrive{PCIPath: dPCIPath}
+
+	return dDev
+}
+
+func TestMyHandleBlockVolume(t *testing.T) {
+	k := kataAgent{}
+	vDevID := "MockVhostUserBlk"
+	bDevID := "MockDeviceBlock"
+	//dDevID := "MockDeviceBlockDirect"
+	vPCI := "01/02"
+	bPCI := "03/04"
+	//dPCI := "04/05"
+	vDestination := "/VhostUserBlk/destination"
+	bDestination := "/DeviceBlock/destination"
+	//dDestination := "/DeviceDirectBlock/destination"
+
+	tests := []struct {
+		name            string
+		mount           Mount
+		device          api.Device
+		expectedStorage pb.Storage
+		wantErr         bool
+	}{
+		{
+			"vhost-user block device",
+			Mount{
+				BlockDeviceID: vDevID,
+				Destination:   vDestination,
+			},
+			getVDev(vDevID, vPCI),
+			pb.Storage{
+				MountPoint: vDestination,
+				Fstype:     "bind",
+				Options:    []string{"bind"},
+				Driver:     kataBlkDevType,
+				Source:     vPCI,
+			},
+			false,
+		},
+		{
+			"block device bind",
+			Mount{
+				BlockDeviceID: bDevID,
+				Destination:   bDestination,
+				Type:          "bind",
+				Options:       []string{"bind"},
+			},
+			getBDev(bDevID, bPCI),
+			pb.Storage{
+				MountPoint: bDestination,
+				Fstype:     "bind",
+				Options:    []string{"bind"},
+				Driver:     kataBlkDevType,
+				Source:     bPCI,
+			},
+			false,
+		},
+	}
+
+	for _, test := range tests {
+
+		c := &Container{
+			sandbox: &Sandbox{
+				id:         "mount-test",
+				hypervisor: &mockHypervisor{},
+				devManager: manager.NewDeviceManager(manager.VirtioBlock, true, "/a/nice/dir", []api.Device{test.device}),
+				ctx:        context.Background(),
+				config: &SandboxConfig{
+					HypervisorConfig: HypervisorConfig{
+						BlockDeviceDriver: manager.VirtioBlock,
+					},
+				},
+			},
+			mounts: []Mount{test.mount},
+		}
+
+		var updatedMounts = make(map[string]Mount)
+		storage, err := k.handleBlockMount(c.sandbox.ctx, &test.mount, c, updatedMounts)
+		assert.NoError(t, err)
+		assert.Equal(t, test.expectedStorage.Fstype, storage.Fstype,
+			"Storage didn't match: got:\n %+v\nexpecting:\n %+v",
+			storage.Fstype, test.expectedStorage.Fstype)
+		assert.Equal(t, test.expectedStorage.Driver, storage.Driver,
+			"Storage didn't match: got: %+vexpecting: %+v",
+			storage.Driver, test.expectedStorage.Driver)
+
+		assert.Equal(t, test.expectedStorage.Source, storage.Source,
+			"Storage didn't match: got:\n %+v\nexpecting:\n %+v",
+			storage.Source, test.expectedStorage.Source)
+	}
+
+	/*
+		k := kataAgent{}
+
+		c := &Container{
+			id: "100",
+		}
+		containers := map[string]*Container{}
+		containers[c.id] = c
+
+		// Create a VhostUserBlk mount and a DeviceBlock mount
+
+		tmpDir := "/vhost/user/dir"
+		dm := manager.NewDeviceManager(manager.VirtioBlock, true, tmpDir, devices)
+
+		sConfig := SandboxConfig{}
+		sConfig.HypervisorConfig.BlockDeviceDriver = manager.VirtioBlock
+		sandbox := Sandbox{
+			id:         "100",
+			containers: containers,
+			hypervisor: &mockHypervisor{},
+			devManager: dm,
+			ctx:        context.Background(),
+			config:     &sConfig,
+		}
+		containers[c.id].sandbox = &sandbox
+		containers[c.id].mounts = mounts
+
+		volumeStorages, err := k.handleBlockVolumes(c)
+		assert.Nil(t, err, "Error while handling block volumes")
+
+		vStorage := &pb.Storage{
+			MountPoint: vDestination,
+			Fstype:     "bind",
+			Options:    []string{"bind"},
+			Driver:     kataBlkDevType,
+			Source:     vPCIPath.String(),
+		}
+		bStorage := &pb.Storage{
+			MountPoint: bDestination,
+			Fstype:     "bind",
+			Options:    []string{"bind"},
+			Driver:     kataBlkDevType,
+			Source:     bPCIPath.String(),
+		}
+		dStorage := &pb.Storage{
+			MountPoint: dDestination,
+			Fstype:     "ext4",
+			Options:    []string{"ro"},
+			Driver:     kataBlkDevType,
+			Source:     dPCIPath.String(),
+		}
+
+		assert.Equal(t, vStorage, volumeStorages[0], "Error while handle VhostUserBlk type block volume")
+		assert.Equal(t, bStorage, volumeStorages[1], "Error while handle BlockDevice type block volume")
+		assert.Equal(t, dStorage, volumeStorages[2], "Error while handle direct BlockDevice type block volume")
+	*/
+
 }
 
 func TestHandleBlockVolume(t *testing.T) {
@@ -616,6 +783,7 @@ func TestConstraintGRPCSpec(t *testing.T) {
 	assert.Empty(g.Linux.Devices)
 }
 
+/*
 func TestHandleShm(t *testing.T) {
 	assert := assert.New(t)
 	k := kataAgent{}
@@ -671,7 +839,7 @@ func TestHandleShm(t *testing.T) {
 		"Ephemeral mount point didn't match: got %s, expecting %s", epheMountPoint, expected)
 
 }
-
+*/
 func testIsPidNamespacePresent(grpcSpec *pb.Spec) bool {
 	for _, ns := range grpcSpec.Linux.Namespaces {
 		if ns.Type == string(specs.PIDNamespace) {

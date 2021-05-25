@@ -436,14 +436,14 @@ func (c *Container) setContainerState(state types.StateString) error {
 	return nil
 }
 
-func (c *Container) shareFiles(ctx context.Context, m Mount, idx int, hostSharedDir, hostMountDir, guestSharedDir string) (string, bool, error) {
+func (c *Container) shareFiles(ctx context.Context, m *Mount) (string, bool, error) {
 	randBytes, err := utils.GenerateRandomBytes(8)
 	if err != nil {
 		return "", false, err
 	}
 
 	filename := fmt.Sprintf("%s-%s-%s", c.id, hex.EncodeToString(randBytes), filepath.Base(m.Destination))
-	guestDest := filepath.Join(guestSharedDir, filename)
+	guestDest := filepath.Join(kataGuestSharedDir(), filename)
 
 	// copy file to contaier's rootfs if filesystem sharing is not supported, otherwise
 	// bind mount it in the shared directory.
@@ -470,7 +470,7 @@ func (c *Container) shareFiles(ctx context.Context, m Mount, idx int, hostShared
 		}
 	} else {
 		// These mounts are created in the shared dir
-		mountDest := filepath.Join(hostMountDir, filename)
+		mountDest := filepath.Join(getMountPath(c.sandboxID), filename)
 		if !m.ReadOnly {
 			if err := bindMount(c.ctx, m.Source, mountDest, false, "private"); err != nil {
 				return "", false, err
@@ -498,93 +498,13 @@ func (c *Container) shareFiles(ctx context.Context, m Mount, idx int, hostShared
 			}
 
 			syscall.Unmount(privateDest, syscall.MNT_DETACH|UmountNoFollow)
+
 		}
-		// Save HostPath mount value into the mount list of the container.
-		c.mounts[idx].HostPath = mountDest
+		// Save HostPath mount value into container's mount object:
+		m.HostPath = mountDest
 	}
 
 	return guestDest, false, nil
-}
-
-// mountSharedDirMounts handles bind-mounts by bindmounting to the host shared
-// directory which is mounted through virtiofs/9pfs in the VM.
-// It also updates the container mount list with the HostPath info, and store
-// container mounts to the storage. This way, we will have the HostPath info
-// available when we will need to unmount those mounts.
-func (c *Container) mountSharedDirMounts(ctx context.Context, hostSharedDir, hostMountDir, guestSharedDir string) (sharedDirMounts map[string]Mount, ignoredMounts map[string]Mount, err error) {
-	sharedDirMounts = make(map[string]Mount)
-	ignoredMounts = make(map[string]Mount)
-	var devicesToDetach []string
-	defer func() {
-		if err != nil {
-			for _, id := range devicesToDetach {
-				c.sandbox.devManager.DetachDevice(ctx, id, c.sandbox)
-			}
-		}
-	}()
-	for idx, m := range c.mounts {
-		// Skip mounting certain system paths from the source on the host side
-		// into the container as it does not make sense to do so.
-		// Example sources could be /sys/fs/cgroup etc.
-		if isSystemMount(m.Source) {
-			continue
-		}
-
-		// Check if mount is a block device file. If it is, the block device will be attached to the host
-		// instead of passing this as a shared mount:
-		if len(m.BlockDeviceID) > 0 {
-			// Attach this block device, all other devices passed in the config have been attached at this point
-			if err = c.sandbox.devManager.AttachDevice(ctx, m.BlockDeviceID, c.sandbox); err != nil {
-				return nil, nil, err
-			}
-			devicesToDetach = append(devicesToDetach, m.BlockDeviceID)
-			continue
-		}
-
-		// For non-block based mounts, we are only interested in bind mounts
-		if m.Type != "bind" {
-			continue
-		}
-
-		// We need to treat /dev/shm as a special case. This is passed as a bind mount in the spec,
-		// but it does not make sense to pass this as a mount from the host side.
-		// This needs to be handled purely in the guest, by allocating memory for this inside the VM.
-		if m.Destination == "/dev/shm" {
-			continue
-		}
-
-		// Ignore /dev, directories and all other device files. We handle
-		// only regular files in /dev. It does not make sense to pass the host
-		// device nodes to the guest.
-		if isHostDevice(m.Destination) {
-			continue
-		}
-
-		var ignore bool
-		var guestDest string
-		guestDest, ignore, err = c.shareFiles(ctx, m, idx, hostSharedDir, hostMountDir, guestSharedDir)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		// Expand the list of mounts to ignore.
-		if ignore {
-			ignoredMounts[m.Source] = Mount{Source: m.Source}
-			continue
-		}
-
-		sharedDirMount := Mount{
-			Source:      guestDest,
-			Destination: m.Destination,
-			Type:        m.Type,
-			Options:     m.Options,
-			ReadOnly:    m.ReadOnly,
-		}
-
-		sharedDirMounts[sharedDirMount.Destination] = sharedDirMount
-	}
-
-	return sharedDirMounts, ignoredMounts, nil
 }
 
 func (c *Container) unmountHostMounts(ctx context.Context) error {
