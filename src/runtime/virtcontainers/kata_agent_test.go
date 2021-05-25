@@ -324,26 +324,32 @@ func TestHandleDeviceBlockVolume(t *testing.T) {
 	}
 }
 
-func getVDev(devID, pciPath string) api.Device {
-	vPCIPath, _ := vcTypes.PciPathFromString(pciPath)
+func getVDev(t *testing.T, devID, pciPath string) api.Device {
+	vPCIPath, err := vcTypes.PciPathFromString(pciPath)
+	assert.NoError(t, err)
 	vDev := drivers.NewVhostUserBlkDevice(&config.DeviceInfo{ID: devID})
 	vDev.VhostUserDeviceAttrs = &config.VhostUserDeviceAttrs{PCIPath: vPCIPath}
 
 	return vDev
 }
 
-func getBDev(devID, pciPath string) api.Device {
-	bPCIPath, _ := vcTypes.PciPathFromString(pciPath)
+func getBDev(t *testing.T, devID, pciPath string) api.Device {
+	bPCIPath, err := vcTypes.PciPathFromString(pciPath)
+	assert.NoError(t, err)
 	bDev := drivers.NewBlockDevice(&config.DeviceInfo{ID: devID})
 	bDev.BlockDrive = &config.BlockDrive{PCIPath: bPCIPath}
 
 	return bDev
 }
 
-func getDDev(devID, pciPath string) api.Device {
-	dPCIPath, _ := vcTypes.PciPathFromString(pciPath)
+func getDDev(t *testing.T, devID, pciPath string) api.Device {
+	dPCIPath, err := vcTypes.PciPathFromString(pciPath)
+	assert.Error(t, err)
+	fmt.Printf("dPCIPath: %s\n", dPCIPath.String())
 	dDev := drivers.NewBlockDevice(&config.DeviceInfo{ID: devID})
 	dDev.BlockDrive = &config.BlockDrive{PCIPath: dPCIPath}
+
+	fmt.Printf("dPCIPathagaing: %s\n", dDev.BlockDrive.PCIPath.String())
 
 	return dDev
 }
@@ -352,13 +358,13 @@ func TestMyHandleBlockVolume(t *testing.T) {
 	k := kataAgent{}
 	vDevID := "MockVhostUserBlk"
 	bDevID := "MockDeviceBlock"
-	//dDevID := "MockDeviceBlockDirect"
+	dDevID := "MockDeviceBlockDirect"
 	vPCI := "01/02"
 	bPCI := "03/04"
-	//dPCI := "04/05"
+	dPCI := "04/05"
 	vDestination := "/VhostUserBlk/destination"
 	bDestination := "/DeviceBlock/destination"
-	//dDestination := "/DeviceDirectBlock/destination"
+	dDestination := "/DeviceDirectBlock/destination"
 
 	tests := []struct {
 		name            string
@@ -373,7 +379,7 @@ func TestMyHandleBlockVolume(t *testing.T) {
 				BlockDeviceID: vDevID,
 				Destination:   vDestination,
 			},
-			getVDev(vDevID, vPCI),
+			getVDev(t, vDevID, vPCI),
 			pb.Storage{
 				MountPoint: vDestination,
 				Fstype:     "bind",
@@ -391,7 +397,7 @@ func TestMyHandleBlockVolume(t *testing.T) {
 				Type:          "bind",
 				Options:       []string{"bind"},
 			},
-			getBDev(bDevID, bPCI),
+			getBDev(t, bDevID, bPCI),
 			pb.Storage{
 				MountPoint: bDestination,
 				Fstype:     "bind",
@@ -401,16 +407,36 @@ func TestMyHandleBlockVolume(t *testing.T) {
 			},
 			false,
 		},
+		{
+			"direct assigned block device",
+			Mount{
+				BlockDeviceID: dDevID,
+				Destination:   dDestination,
+				Type:          "ext4",
+				Options:       []string{"ro"},
+			},
+			getDDev(t, dDevID, dPCI),
+			pb.Storage{
+				MountPoint: dDestination,
+				Fstype:     "ext4",
+				Options:    []string{"ro"},
+				Driver:     kataBlkDevType,
+				Source:     dPCI,
+			},
+			false,
+		},
 	}
 
 	for _, test := range tests {
 
+		fmt.Printf("agaaaaain: %+v\n", test.device.GetDeviceInfo())
 		c := &Container{
 			sandbox: &Sandbox{
 				id:         "mount-test",
 				hypervisor: &mockHypervisor{},
-				devManager: manager.NewDeviceManager(manager.VirtioBlock, true, "/a/nice/dir", []api.Device{test.device}),
+				devManager: manager.NewDeviceManager(manager.VirtioBlock, true, "/a/nice/dir", []api.Device{getVDev(t, vDevID, vPCI), getBDev(t, bDevID, bPCI), getDDev(t, dDevID, dPCI)}),
 				ctx:        context.Background(),
+				state:      types.SandboxState{BlockIndexMap: make(map[int]struct{})},
 				config: &SandboxConfig{
 					HypervisorConfig: HypervisorConfig{
 						BlockDeviceDriver: manager.VirtioBlock,
@@ -433,65 +459,8 @@ func TestMyHandleBlockVolume(t *testing.T) {
 		assert.Equal(t, test.expectedStorage.Source, storage.Source,
 			"Storage didn't match: got:\n %+v\nexpecting:\n %+v",
 			storage.Source, test.expectedStorage.Source)
+
 	}
-
-	/*
-		k := kataAgent{}
-
-		c := &Container{
-			id: "100",
-		}
-		containers := map[string]*Container{}
-		containers[c.id] = c
-
-		// Create a VhostUserBlk mount and a DeviceBlock mount
-
-		tmpDir := "/vhost/user/dir"
-		dm := manager.NewDeviceManager(manager.VirtioBlock, true, tmpDir, devices)
-
-		sConfig := SandboxConfig{}
-		sConfig.HypervisorConfig.BlockDeviceDriver = manager.VirtioBlock
-		sandbox := Sandbox{
-			id:         "100",
-			containers: containers,
-			hypervisor: &mockHypervisor{},
-			devManager: dm,
-			ctx:        context.Background(),
-			config:     &sConfig,
-		}
-		containers[c.id].sandbox = &sandbox
-		containers[c.id].mounts = mounts
-
-		volumeStorages, err := k.handleBlockVolumes(c)
-		assert.Nil(t, err, "Error while handling block volumes")
-
-		vStorage := &pb.Storage{
-			MountPoint: vDestination,
-			Fstype:     "bind",
-			Options:    []string{"bind"},
-			Driver:     kataBlkDevType,
-			Source:     vPCIPath.String(),
-		}
-		bStorage := &pb.Storage{
-			MountPoint: bDestination,
-			Fstype:     "bind",
-			Options:    []string{"bind"},
-			Driver:     kataBlkDevType,
-			Source:     bPCIPath.String(),
-		}
-		dStorage := &pb.Storage{
-			MountPoint: dDestination,
-			Fstype:     "ext4",
-			Options:    []string{"ro"},
-			Driver:     kataBlkDevType,
-			Source:     dPCIPath.String(),
-		}
-
-		assert.Equal(t, vStorage, volumeStorages[0], "Error while handle VhostUserBlk type block volume")
-		assert.Equal(t, bStorage, volumeStorages[1], "Error while handle BlockDevice type block volume")
-		assert.Equal(t, dStorage, volumeStorages[2], "Error while handle direct BlockDevice type block volume")
-	*/
-
 }
 
 func TestHandleBlockVolume(t *testing.T) {
@@ -564,7 +533,8 @@ func TestHandleBlockVolume(t *testing.T) {
 	containers[c.id].sandbox = &sandbox
 	containers[c.id].mounts = mounts
 
-	volumeStorages, err := k.handleBlockVolumes(c)
+	var updatedMounts = make(map[string]Mount)
+	volumeStorage, err := k.handleBlockMount(c.sandbox.ctx, &vMount, c, updatedMounts)
 	assert.Nil(t, err, "Error while handling block volumes")
 
 	vStorage := &pb.Storage{
@@ -574,24 +544,33 @@ func TestHandleBlockVolume(t *testing.T) {
 		Driver:     kataBlkDevType,
 		Source:     vPCIPath.String(),
 	}
-	bStorage := &pb.Storage{
-		MountPoint: bDestination,
-		Fstype:     "bind",
-		Options:    []string{"bind"},
-		Driver:     kataBlkDevType,
-		Source:     bPCIPath.String(),
-	}
-	dStorage := &pb.Storage{
-		MountPoint: dDestination,
-		Fstype:     "ext4",
-		Options:    []string{"ro"},
-		Driver:     kataBlkDevType,
-		Source:     dPCIPath.String(),
-	}
-
-	assert.Equal(t, vStorage, volumeStorages[0], "Error while handle VhostUserBlk type block volume")
-	assert.Equal(t, bStorage, volumeStorages[1], "Error while handle BlockDevice type block volume")
-	assert.Equal(t, dStorage, volumeStorages[2], "Error while handle direct BlockDevice type block volume")
+	assert.Equal(t, vStorage.Source, volumeStorage.Source, "??")
+	/*
+		vStorage := &pb.Storage{
+			MountPoint: vDestination,
+			Fstype:     "bind",
+			Options:    []string{"bind"},
+			Driver:     kataBlkDevType,
+			Source:     vPCIPath.String(),
+		}
+		bStorage := &pb.Storage{
+			MountPoint: bDestination,
+			Fstype:     "bind",
+			Options:    []string{"bind"},
+			Driver:     kataBlkDevType,
+			Source:     bPCIPath.String(),
+		}
+		dStorage := &pb.Storage{
+			MountPoint: dDestination,
+			Fstype:     "ext4",
+			Options:    []string{"ro"},
+			Driver:     kataBlkDevType,
+			Source:     dPCIPath.String(),
+		}
+		assert.Equal(t, vStorage, volumeStorages[0], "Error while handle VhostUserBlk type block volume")
+		assert.Equal(t, bStorage, volumeStorages[1], "Error while handle BlockDevice type block volume")
+		assert.Equal(t, dStorage, volumeStorages[2], "Error while handle direct BlockDevice type block volume")
+	*/
 }
 
 func TestAppendDevicesEmptyContainerDeviceList(t *testing.T) {

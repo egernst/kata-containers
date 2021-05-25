@@ -1268,6 +1268,7 @@ func (k *kataAgent) handleBlockMount(ctx context.Context, mount *Mount, c *Conta
 	var err error
 
 	id := mount.BlockDeviceID
+
 	// attach this block device; all other devices passed in the config have been attached at this point
 	if err = c.sandbox.devManager.AttachDevice(ctx, id, c.sandbox); err != nil {
 		return nil, err
@@ -1285,8 +1286,10 @@ func (k *kataAgent) handleBlockMount(ctx context.Context, mount *Mount, c *Conta
 
 	switch device.DeviceType() {
 	case config.DeviceBlock:
+		fmt.Printf("..again: %+v\n", device.GetDeviceInfo())
 		storage, err = k.handleDeviceBlockVolume(c, *mount, device)
 	case config.VhostUserBlk:
+		fmt.Printf("..again: %+v\n", device.GetDeviceInfo())
 		storage, err = k.handleVhostUserBlkVolume(c, *mount, device)
 	default:
 		k.Logger().Error("Unknown device type")
@@ -1590,6 +1593,7 @@ func (k *kataAgent) handleDeviceBlockVolume(c *Container, m Mount, device api.De
 		vol.Source = blockDrive.DevNo
 	case c.sandbox.config.HypervisorConfig.BlockDeviceDriver == config.VirtioBlock:
 		vol.Driver = kataBlkDevType
+		fmt.Printf("hi there: %s\n", blockDrive.PCIPath.String())
 		vol.Source = blockDrive.PCIPath.String()
 	case c.sandbox.config.HypervisorConfig.BlockDeviceDriver == config.VirtioMmio:
 		vol.Driver = kataMmioBlkDevType
