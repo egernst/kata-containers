@@ -10,7 +10,9 @@ import (
 	"errors"
 	"os"
 
+	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/device/config"
 	persistapi "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/persist/api"
+	vcTypes "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/types"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
 )
 
@@ -68,6 +70,9 @@ func (m *mockHypervisor) hotplugAddDevice(ctx context.Context, devInfo interface
 	case memoryDev:
 		memdev := devInfo.(*memoryDevice)
 		return memdev.sizeMB, nil
+	case blockDev:
+		drive := devInfo.(*config.BlockDrive)
+		drive.PCIPath, _ = vcTypes.PciPathFromString("10/04")
 	}
 	return nil, nil
 }

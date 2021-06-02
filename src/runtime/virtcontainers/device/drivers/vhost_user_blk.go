@@ -8,6 +8,7 @@ package drivers
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/device/api"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/device/config"
@@ -24,6 +25,7 @@ type VhostUserBlkDevice struct {
 
 // NewVhostUserBlkDevice creates a new vhost-user block device based on DeviceInfo
 func NewVhostUserBlkDevice(devInfo *config.DeviceInfo) *VhostUserBlkDevice {
+	fmt.Println("do we make further? it vhost user block??")
 	return &VhostUserBlkDevice{
 		GenericDevice: &GenericDevice{
 			ID:         devInfo.ID,

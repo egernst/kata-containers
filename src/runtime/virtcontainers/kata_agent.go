@@ -1278,18 +1278,20 @@ func (k *kataAgent) handleBlockMount(ctx context.Context, mount *Mount, c *Conta
 	// device is detached with detachDevices() for a container.
 	c.devices = append(c.devices, ContainerDevice{ID: id, ContainerPath: mount.Destination})
 
+	fmt.Println("dev by id")
 	device := c.sandbox.devManager.GetDeviceByID(id)
 	if device == nil {
 		k.Logger().WithField("device", id).Error("failed to find device by id")
 		return nil, fmt.Errorf("Failed to find device by id (id=%s)", id)
 	}
 
+	fmt.Printf("mount pre handler: %+v\n", mount)
 	switch device.DeviceType() {
 	case config.DeviceBlock:
-		fmt.Printf("..again: %+v\n", device.GetDeviceInfo())
+		fmt.Println("block")
 		storage, err = k.handleDeviceBlockVolume(c, *mount, device)
 	case config.VhostUserBlk:
-		fmt.Printf("..again: %+v\n", device.GetDeviceInfo())
+		fmt.Println("vhu block")
 		storage, err = k.handleVhostUserBlkVolume(c, *mount, device)
 	default:
 		k.Logger().Error("Unknown device type")
@@ -1297,6 +1299,8 @@ func (k *kataAgent) handleBlockMount(ctx context.Context, mount *Mount, c *Conta
 	if storage == nil || err != nil {
 		return nil, err
 	}
+
+	fmt.Printf("storage from handler: %+v\n", storage)
 
 	// Create a unique temporary location to mount the Storage. We'll need to update the gRPC storage object's mountpoint
 	// as well as the OCI spec's mounts' source.
@@ -1593,7 +1597,6 @@ func (k *kataAgent) handleDeviceBlockVolume(c *Container, m Mount, device api.De
 		vol.Source = blockDrive.DevNo
 	case c.sandbox.config.HypervisorConfig.BlockDeviceDriver == config.VirtioBlock:
 		vol.Driver = kataBlkDevType
-		fmt.Printf("hi there: %s\n", blockDrive.PCIPath.String())
 		vol.Source = blockDrive.PCIPath.String()
 	case c.sandbox.config.HypervisorConfig.BlockDeviceDriver == config.VirtioMmio:
 		vol.Driver = kataMmioBlkDevType

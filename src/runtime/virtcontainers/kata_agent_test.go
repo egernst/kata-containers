@@ -33,6 +33,7 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/rootless"
 	vcTypes "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/types"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/types"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -324,117 +325,126 @@ func TestHandleDeviceBlockVolume(t *testing.T) {
 	}
 }
 
-func getVDev(t *testing.T, devID, pciPath string) api.Device {
-	vPCIPath, err := vcTypes.PciPathFromString(pciPath)
-	assert.NoError(t, err)
-	vDev := drivers.NewVhostUserBlkDevice(&config.DeviceInfo{ID: devID})
-	vDev.VhostUserDeviceAttrs = &config.VhostUserDeviceAttrs{PCIPath: vPCIPath}
-
-	return vDev
-}
-
-func getBDev(t *testing.T, devID, pciPath string) api.Device {
-	bPCIPath, err := vcTypes.PciPathFromString(pciPath)
-	assert.NoError(t, err)
-	bDev := drivers.NewBlockDevice(&config.DeviceInfo{ID: devID})
-	bDev.BlockDrive = &config.BlockDrive{PCIPath: bPCIPath}
-
-	return bDev
-}
-
-func getDDev(t *testing.T, devID, pciPath string) api.Device {
-	dPCIPath, err := vcTypes.PciPathFromString(pciPath)
-	assert.Error(t, err)
-	fmt.Printf("dPCIPath: %s\n", dPCIPath.String())
-	dDev := drivers.NewBlockDevice(&config.DeviceInfo{ID: devID})
-	dDev.BlockDrive = &config.BlockDrive{PCIPath: dPCIPath}
-
-	fmt.Printf("dPCIPathagaing: %s\n", dDev.BlockDrive.PCIPath.String())
-
-	return dDev
-}
-
 func TestMyHandleBlockVolume(t *testing.T) {
+	assert := assert.New(t)
+	tmpDir, err := ioutil.TempDir("", "test-vhu-store")
+	assert.NoError(err)
+	defer os.RemoveAll(tmpDir)
+
+	// Oh, the fun of testing vhost-user: let's go ahead and create the devices first:
+	vhostUserDevNodePath := filepath.Join(tmpDir, "/block/devices/")
+	vhostUserSockPath := filepath.Join(tmpDir, "/block/sockets/")
+	deviceNodePath := filepath.Join(vhostUserDevNodePath, "vhostblk0")
+	deviceSockPath := filepath.Join(vhostUserSockPath, "vhostblk0")
+
+	err = os.MkdirAll(vhostUserDevNodePath, dirMode)
+	assert.NoError(err)
+	err = os.MkdirAll(vhostUserSockPath, dirMode)
+	assert.NoError(err)
+	_, err = os.Create(deviceSockPath)
+	assert.NoError(err)
+
+	err = unix.Mknod(deviceNodePath, unix.S_IFBLK, int(unix.Mkdev(config.VhostUserBlkMajor, 0)))
+	assert.Nil(t, err)
+
 	k := kataAgent{}
-	vDevID := "MockVhostUserBlk"
-	bDevID := "MockDeviceBlock"
-	dDevID := "MockDeviceBlockDirect"
-	vPCI := "01/02"
-	bPCI := "03/04"
-	dPCI := "04/05"
+
+	// look at mount_test, container_test and sandbox_test for references on creating blk mounts for
+	// mock testing.
+
+	// PCI Address is hard caded within the mocked hypervisor:
+	mockPCIAddr := "10/04"
+
 	vDestination := "/VhostUserBlk/destination"
 	bDestination := "/DeviceBlock/destination"
 	dDestination := "/DeviceDirectBlock/destination"
 
+	var devices []api.Device
+
 	tests := []struct {
 		name            string
 		mount           Mount
-		device          api.Device
+		device          config.DeviceInfo
 		expectedStorage pb.Storage
 		wantErr         bool
 	}{
 		{
 			"vhost-user block device",
 			Mount{
-				BlockDeviceID: vDevID,
-				Destination:   vDestination,
+				Destination: vDestination,
 			},
-			getVDev(t, vDevID, vPCI),
+			config.DeviceInfo{
+				HostPath:      deviceNodePath,
+				ContainerPath: "/dev/baz",
+				DevType:       "b",
+				Major:         config.VhostUserBlkMajor,
+				Minor:         0,
+			},
 			pb.Storage{
 				MountPoint: vDestination,
 				Fstype:     "bind",
 				Options:    []string{"bind"},
 				Driver:     kataBlkDevType,
-				Source:     vPCI,
+				Source:     mockPCIAddr,
 			},
 			false,
 		},
 		{
 			"block device bind",
 			Mount{
-				BlockDeviceID: bDevID,
-				Destination:   bDestination,
-				Type:          "bind",
-				Options:       []string{"bind"},
+				Destination: bDestination,
+				Type:        "bind",
+				Options:     []string{"bind"},
 			},
-			getBDev(t, bDevID, bPCI),
+			config.DeviceInfo{
+				HostPath:      "/dev/foo",
+				ContainerPath: "/baz",
+				DevType:       "b",
+				Major:         38,
+				Minor:         83,
+				ReadOnly:      true,
+			},
 			pb.Storage{
 				MountPoint: bDestination,
 				Fstype:     "bind",
 				Options:    []string{"bind"},
 				Driver:     kataBlkDevType,
-				Source:     bPCI,
+				Source:     mockPCIAddr,
 			},
 			false,
 		},
 		{
-			"direct assigned block device",
+			"direct assigned block device bind",
 			Mount{
-				BlockDeviceID: dDevID,
-				Destination:   dDestination,
-				Type:          "ext4",
-				Options:       []string{"ro"},
+				Destination: dDestination,
+				Type:        "ext4",
+				Options:     []string{"ro"},
 			},
-			getDDev(t, dDevID, dPCI),
+			config.DeviceInfo{
+				HostPath:      "/dev/foo",
+				ContainerPath: "/baz",
+				DevType:       "b",
+				Major:         38,
+				Minor:         83,
+				ReadOnly:      true,
+			},
 			pb.Storage{
 				MountPoint: dDestination,
 				Fstype:     "ext4",
 				Options:    []string{"ro"},
 				Driver:     kataBlkDevType,
-				Source:     dPCI,
+				Source:     mockPCIAddr,
 			},
 			false,
 		},
 	}
 
 	for _, test := range tests {
-
-		fmt.Printf("agaaaaain: %+v\n", test.device.GetDeviceInfo())
 		c := &Container{
 			sandbox: &Sandbox{
 				id:         "mount-test",
 				hypervisor: &mockHypervisor{},
-				devManager: manager.NewDeviceManager(manager.VirtioBlock, true, "/a/nice/dir", []api.Device{getVDev(t, vDevID, vPCI), getBDev(t, bDevID, bPCI), getDDev(t, dDevID, dPCI)}),
+				devManager: manager.NewDeviceManager(manager.VirtioBlock, true, tmpDir, devices),
 				ctx:        context.Background(),
 				state:      types.SandboxState{BlockIndexMap: make(map[int]struct{})},
 				config: &SandboxConfig{
@@ -447,17 +457,24 @@ func TestMyHandleBlockVolume(t *testing.T) {
 		}
 
 		var updatedMounts = make(map[string]Mount)
+
+		// create block device first:
+		b, err := c.sandbox.devManager.NewDevice(test.device)
+		assert.NoError(err)
+		test.mount.BlockDeviceID = b.DeviceID()
+
 		storage, err := k.handleBlockMount(c.sandbox.ctx, &test.mount, c, updatedMounts)
-		assert.NoError(t, err)
-		assert.Equal(t, test.expectedStorage.Fstype, storage.Fstype,
-			"Storage didn't match: got:\n %+v\nexpecting:\n %+v",
+
+		assert.NoError(err)
+		assert.Equal(test.expectedStorage.Fstype, storage.Fstype,
+			"%s: Storage didn't match: got:\n %+v\nexpecting:\n %+v", test.name,
 			storage.Fstype, test.expectedStorage.Fstype)
-		assert.Equal(t, test.expectedStorage.Driver, storage.Driver,
-			"Storage didn't match: got: %+vexpecting: %+v",
+		assert.Equal(test.expectedStorage.Driver, storage.Driver,
+			"%s: Storage didn't match: got: %+vexpecting: %+v", test.name,
 			storage.Driver, test.expectedStorage.Driver)
 
-		assert.Equal(t, test.expectedStorage.Source, storage.Source,
-			"Storage didn't match: got:\n %+v\nexpecting:\n %+v",
+		assert.Equal(test.expectedStorage.Source, storage.Source,
+			"%s: Storage didn't match: got:\n %+v\nexpecting:\n %+v", test.name,
 			storage.Source, test.expectedStorage.Source)
 
 	}
