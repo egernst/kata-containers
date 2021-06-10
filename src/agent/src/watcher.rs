@@ -189,10 +189,12 @@ impl Entries {
         list: impl IntoIterator<Item = Storage>,
         logger: &Logger,
     ) -> Result<()> {
+        debug!(&logger, "entries add");
         for storage in list.into_iter() {
             let entry = Entry::new(storage).await?;
             self.0.push(entry);
         }
+        debug!(logger, "adding an entry...");
 
         // Perform initial copy
         self.check(logger).await?;
@@ -201,6 +203,7 @@ impl Entries {
     }
 
     async fn check(&mut self, logger: &Logger) -> Result<()> {
+        debug!(logger, "calling check");
         for entry in self.0.iter_mut() {
             entry.scan(logger).await?;
         }
@@ -238,7 +241,9 @@ impl BindWatcher {
         mounts: impl IntoIterator<Item = Storage>,
         logger: &Logger,
     ) -> Result<()> {
+        debug!(&logger, "add_container");
         if self.watch_thread.is_none() {
+            debug!(&logger, "setting up the watcher");
             // Virtiofs shared path is RO by default, back it by tmpfs.
             self.mount(logger).await?;
 
@@ -249,8 +254,10 @@ impl BindWatcher {
                 WATCH_INTERVAL_SECS,
             );
 
+            debug!(&logger, "the watcher has been spawned");
             self.watch_thread = Some(join_handle);
         }
+        debug!(&logger, "ok, ready to add entry et al");
 
         self.shared
             .lock()
