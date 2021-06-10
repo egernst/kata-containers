@@ -16,7 +16,7 @@ use tokio::time::{self, Duration};
 use anyhow::{ensure, Context, Result};
 use async_recursion::async_recursion;
 use nix::mount::{umount, MsFlags};
-use slog::{error, Logger};
+use slog::{debug, error, Logger};
 
 use crate::mount::BareMount;
 use crate::protocols::agent::Storage;
@@ -30,19 +30,18 @@ const WATCH_INTERVAL_SECS: u64 = 2;
 /// Destination path for tmpfs
 const WATCH_MOUNT_POINT_PATH: &str = "/run/kata-containers/shared/containers/watchable/";
 
-/// Represents a single file entry to be watched.
-#[derive(Debug, Clone)]
-struct File {
-    file: PathBuf,
-    modified: SystemTime,
-}
-
 /// Represents a single storage entry (may have multiple files to watch).
 #[derive(Default, Debug, Clone)]
 struct Entry {
     source: PathBuf,
     mount_point: PathBuf,
-    files: Vec<File>,
+    files: HashMap<PathBuf, SystemTime>,
+}
+
+impl Drop for Entry {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.mount_point);
+    }
 }
 
 impl Entry {
@@ -57,93 +56,111 @@ impl Entry {
             mount_point = mount_point.join(filename);
         }
 
-        let mut entry = Entry::default();
-        entry.add_path(&source).await?;
-
-        entry.source = source;
-        entry.mount_point = mount_point;
+        let entry = Entry {
+            source,
+            mount_point,
+            files: HashMap::new(),
+        };
 
         Ok(entry)
     }
 
-    /// Adds file entries from the given path
+    async fn update_target(
+        &self,
+        logger: &Logger,
+        source_file_path: impl AsRef<Path>,
+    ) -> Result<()> {
+        let source_file_path = source_file_path.as_ref();
+        let dest_file_path = self.make_dest_path(&source_file_path)?;
+
+        if let Some(path) = dest_file_path.parent() {
+            debug!(logger, "Creating destination directory: {}", path.display());
+            fs::create_dir_all(path).await?;
+        }
+
+        debug!(
+            logger,
+            "Copy from {} to {}",
+            source_file_path.display(),
+            dest_file_path.display()
+        );
+        fs::copy(source_file_path, dest_file_path).await?;
+
+        Ok(())
+    }
+
+    async fn scan(&mut self, logger: &Logger) -> Result<usize> {
+        debug!(logger, "Scanning for changes");
+
+        let mut remove_list = Vec::new();
+
+        // Remove deleted files for tracking list
+        self.files.retain(|st, _| {
+            if st.exists() {
+                true
+            } else {
+                remove_list.push(st.to_path_buf());
+                false
+            }
+        });
+
+        // Delete from target
+        for path in remove_list {
+            // Entry has been deleted, remove it from target mount
+            let target = self.make_dest_path(path)?;
+            debug!(logger, "Removing file from mount: {}", target.display());
+            let _ = fs::remove_file(target).await;
+        }
+
+        // Scan new & changed files
+        let count = self
+            .scan_path(logger, self.source.clone().as_path())
+            .await?;
+
+        Ok(count)
+    }
+
     #[async_recursion]
-    async fn add_path(&mut self, path: &Path) -> Result<()> {
+    async fn scan_path(&mut self, logger: &Logger, path: &Path) -> Result<usize> {
+        let mut count = 0;
+
+        debug!(logger, "Scanning path: {}", path.display());
+
         if path.is_file() {
-            self.add_file(path)
-                .await
-                .with_context(|| format!("Failed to add file {}", path.display()))?;
+            let modified = path.metadata()?.modified()?;
+
+            ensure!(
+                self.files.len() <= MAX_ENTRIES_PER_STORAGE,
+                "Too many file system entries to watch (must be < {})",
+                MAX_ENTRIES_PER_STORAGE
+            );
+
+            // Insert will return old entry if any
+            if let Some(old_st) = self.files.insert(path.to_path_buf(), modified) {
+                if modified > old_st {
+                    // Modified date changed, update target
+                    debug!(logger, "Updating file: {}", path.display());
+                    self.update_target(logger, path).await?;
+                    count += 1;
+                }
+            } else {
+                // Entry just added, copy to target
+                debug!(logger, "Copying new entry: {}", path.display());
+                self.update_target(logger, path).await?;
+                count += 1;
+            }
         } else {
+            // Scan dir recursively
             let mut entries = fs::read_dir(path)
                 .await
                 .with_context(|| format!("Failed to read dir: {}", path.display()))?;
 
             while let Some(entry) = entries.next_entry().await? {
-                self.add_path(entry.path().as_path()).await?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Adds a single file path entry
-    async fn add_file(&mut self, file: &Path) -> Result<()> {
-        ensure!(
-            self.files.len() <= MAX_ENTRIES_PER_STORAGE,
-            "Too many file system entries to watch (must be < {})",
-            MAX_ENTRIES_PER_STORAGE
-        );
-
-        let entry = File {
-            file: file.to_path_buf(),
-            // Set minimum value to perform initial copy during next check
-            modified: SystemTime::UNIX_EPOCH,
-        };
-
-        self.files.push(entry);
-        Ok(())
-    }
-
-    async fn check(&mut self) -> Result<usize> {
-        let mut count = 0;
-        for i in 0..self.files.len() {
-            if self.check_file(i).await? {
-                count += 1;
+                count += self.scan_path(logger, entry.path().as_path()).await?;
             }
         }
 
         Ok(count)
-    }
-
-    async fn check_file(&mut self, i: usize) -> Result<bool> {
-        let entry = &mut self.files[i];
-
-        let current = modified(&entry.file).await?;
-        if current <= entry.modified {
-            return Ok(false);
-        }
-
-        // Update entry
-        entry.modified = current;
-
-        // We no longer need mutable borrow, reborrow.
-        let entry = &self.files[i];
-
-        // File to file copy
-        if self.source.is_file() {
-            fs::copy(&self.source, &self.mount_point).await?;
-            return Ok(true);
-        }
-
-        // Dir to dir copy
-        let source_file_path = entry.file.as_path();
-        let dest_file_path = self.make_dest_path(&source_file_path)?;
-
-        if let Some(path) = dest_file_path.parent() {
-            fs::create_dir_all(path).await?;
-        }
-
-        fs::copy(source_file_path, dest_file_path).await?;
-        Ok(true)
     }
 
     fn make_dest_path(&self, source_file_path: impl AsRef<Path>) -> Result<PathBuf> {
@@ -157,8 +174,8 @@ impl Entry {
                     &self.source.display()
                 )
             })?;
-        let dest_file_path = Path::new(&self.mount_point).join(relative_path);
 
+        let dest_file_path = Path::new(&self.mount_point).join(relative_path);
         Ok(dest_file_path)
     }
 }
@@ -167,36 +184,28 @@ impl Entry {
 struct Entries(Vec<Entry>);
 
 impl Entries {
-    async fn add(&mut self, list: impl IntoIterator<Item = Storage>) -> Result<()> {
+    async fn add(
+        &mut self,
+        list: impl IntoIterator<Item = Storage>,
+        logger: &Logger,
+    ) -> Result<()> {
         for storage in list.into_iter() {
             let entry = Entry::new(storage).await?;
-
             self.0.push(entry);
         }
 
         // Perform initial copy
-        self.check().await?;
+        self.check(logger).await?;
 
         Ok(())
     }
 
-    async fn check(&mut self) -> Result<()> {
+    async fn check(&mut self, logger: &Logger) -> Result<()> {
         for entry in self.0.iter_mut() {
-            entry.check().await?;
+            entry.scan(logger).await?;
         }
         Ok(())
     }
-}
-
-async fn modified<P: AsRef<Path>>(path: P) -> Result<SystemTime> {
-    let path = path.as_ref();
-
-    let time = fs::metadata(path)
-        .await
-        .with_context(|| format!("Failed to get metadata for {}", path.display()))?
-        .modified()?;
-
-    Ok(time)
 }
 
 /// Handles watchable mounts, the watcher keeps a list of files to monitor and periodically checks
@@ -248,7 +257,7 @@ impl BindWatcher {
             .await
             .entry(id.to_owned())
             .or_insert_with(Entries::default)
-            .add(mounts)
+            .add(mounts, logger)
             .await?;
 
         Ok(())
@@ -269,8 +278,9 @@ impl BindWatcher {
             loop {
                 interval.tick().await;
 
+                debug!(&logger, "Looking for changed files");
                 for (_, entries) in shared.lock().await.iter_mut() {
-                    if let Err(err) = entries.check().await {
+                    if let Err(err) = entries.check(&logger).await {
                         // We don't fail background loop, but rather log error instead.
                         error!(logger, "Check failed: {}", err);
                     }
@@ -314,37 +324,6 @@ mod tests {
     use std::thread;
 
     #[tokio::test]
-    async fn add_files_from_path() {
-        // Prepare source directory:
-        // ./tmp/1.txt
-        // ./tmp/A/B/C/2.txt
-        let source_dir = tempfile::tempdir().unwrap();
-        fs::write(source_dir.path().join("1.txt"), "one").unwrap();
-        fs::create_dir_all(source_dir.path().join("A/B/C")).unwrap();
-        fs::write(source_dir.path().join("A/B/C/1.txt"), "one").unwrap();
-
-        let target_dir = tempfile::tempdir().unwrap();
-
-        let entry = Entry::new(Storage {
-            source: source_dir.path().display().to_string(),
-            mount_point: target_dir.path().display().to_string(),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-
-        assert_eq!(2, entry.files.len());
-        assert_eq!(
-            entry.files[0].file,
-            source_dir.path().join("A/B/C/1.txt").to_path_buf()
-        );
-        assert_eq!(
-            entry.files[1].file,
-            source_dir.path().join("1.txt").to_path_buf()
-        );
-    }
-
-    #[tokio::test]
     async fn watch_directory() {
         // Prepare source directory:
         // ./tmp/1.txt
@@ -364,28 +343,28 @@ mod tests {
         .await
         .unwrap();
 
-        let files = entry.files.clone();
-        assert_eq!(files.len(), 2);
-        assert_eq!(entry.check().await.unwrap(), 2);
+        let logger = slog::Logger::root(slog::Discard, o!());
+
+        assert_eq!(entry.scan(&logger).await.unwrap(), 2);
 
         // Should copy no files since nothing is changed since last check
-        assert_eq!(entry.check().await.unwrap(), 0);
+        assert_eq!(entry.scan(&logger).await.unwrap(), 0);
 
         // Should copy 1 file
         thread::sleep(Duration::from_secs(1));
         fs::write(source_dir.path().join("A/B/1.txt"), "updated").unwrap();
-        assert_eq!(entry.check().await.unwrap(), 1);
+        assert_eq!(entry.scan(&logger).await.unwrap(), 1);
         assert_eq!(
             fs::read_to_string(dest_dir.path().join("A/B/1.txt")).unwrap(),
             "updated"
         );
 
         // Should copy no new files after copy happened
-        assert_eq!(entry.check().await.unwrap(), 0);
+        assert_eq!(entry.scan(&logger).await.unwrap(), 0);
 
         // Update another file
         fs::write(source_dir.path().join("1.txt"), "updated").unwrap();
-        assert_eq!(entry.check().await.unwrap(), 1);
+        assert_eq!(entry.scan(&logger).await.unwrap(), 1);
     }
 
     #[tokio::test]
@@ -403,16 +382,52 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(entry.check().await.unwrap(), 1);
+        let logger = slog::Logger::root(slog::Discard, o!());
+
+        assert_eq!(entry.scan(&logger).await.unwrap(), 1);
 
         thread::sleep(Duration::from_secs(1));
         fs::write(source_dir.path().join("1.txt"), "two").unwrap();
-        assert_eq!(entry.check().await.unwrap(), 1);
+        assert_eq!(entry.scan(&logger).await.unwrap(), 1);
         assert_eq!(
             fs::read_to_string(dest_dir.path().join("1.txt")).unwrap(),
             "two"
         );
-        assert_eq!(entry.check().await.unwrap(), 0);
+        assert_eq!(entry.scan(&logger).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn delete_file() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let source_file = source_dir.path().join("1.txt");
+        fs::write(&source_file, "one").unwrap();
+
+        let dest_dir = tempfile::tempdir().unwrap();
+        let target_file = dest_dir.path().join("1.txt");
+
+        let mut entry = Entry::new(Storage {
+            source: source_dir.path().display().to_string(),
+            mount_point: dest_dir.path().display().to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        let logger = slog::Logger::root(slog::Discard, o!());
+
+        assert_eq!(entry.scan(&logger).await.unwrap(), 1);
+        assert_eq!(entry.files.len(), 1);
+
+        assert!(target_file.exists());
+        assert!(entry.files.contains_key(&source_file));
+
+        // Remove source file
+        fs::remove_file(&source_file).unwrap();
+
+        assert_eq!(entry.scan(&logger).await.unwrap(), 0);
+
+        assert_eq!(entry.files.len(), 0);
+        assert!(!target_file.exists());
     }
 
     #[tokio::test]
