@@ -75,7 +75,9 @@ impl Entry {
 
         if let Some(path) = dest_file_path.parent() {
             debug!(logger, "Creating destination directory: {}", path.display());
-            fs::create_dir_all(path).await?;
+            fs::create_dir_all(path)
+                .await
+                .with_context(|| format!("Unable to mkdir all for {}", path.display()))?;
         }
 
         debug!(
@@ -84,7 +86,15 @@ impl Entry {
             source_file_path.display(),
             dest_file_path.display()
         );
-        fs::copy(source_file_path, dest_file_path).await?;
+        fs::copy(&source_file_path, &dest_file_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "Copy from {} to {} failed",
+                    source_file_path.display(),
+                    dest_file_path.display()
+                )
+            })?;
 
         Ok(())
     }
@@ -115,7 +125,8 @@ impl Entry {
         // Scan new & changed files
         let count = self
             .scan_path(logger, self.source.clone().as_path())
-            .await?;
+            .await
+            .with_context(|| "Scan path failed")?;
 
         Ok(count)
     }
@@ -127,7 +138,11 @@ impl Entry {
         debug!(logger, "Scanning path: {}", path.display());
 
         if path.is_file() {
-            let modified = path.metadata()?.modified()?;
+            let modified = path
+                .metadata()
+                .with_context(|| format!("Failed to query metadata for: {}", path.display()))?
+                .modified()
+                .with_context(|| format!("Failed to get modified date for: {}", path.display()))?;
 
             ensure!(
                 self.files.len() <= MAX_ENTRIES_PER_STORAGE,
@@ -156,7 +171,11 @@ impl Entry {
                 .with_context(|| format!("Failed to read dir: {}", path.display()))?;
 
             while let Some(entry) = entries.next_entry().await? {
-                count += self.scan_path(logger, entry.path().as_path()).await?;
+                let path = entry.path();
+                count += self
+                    .scan_path(logger, path.as_path())
+                    .await
+                    .with_context(|| format!("Unable to scan inner path: {}", path.display()))?;
             }
         }
 
@@ -191,13 +210,17 @@ impl Entries {
     ) -> Result<()> {
         debug!(&logger, "entries add");
         for storage in list.into_iter() {
-            let entry = Entry::new(storage).await?;
+            let entry = Entry::new(storage)
+                .await
+                .with_context(|| "Failed to add storage")?;
             self.0.push(entry);
         }
         debug!(logger, "adding an entry...");
 
         // Perform initial copy
-        self.check(logger).await?;
+        self.check(logger)
+            .await
+            .with_context(|| "Failed to perform initial check")?;
 
         Ok(())
     }
@@ -262,10 +285,11 @@ impl BindWatcher {
         self.shared
             .lock()
             .await
-            .entry(id.to_owned())
+            .entry(id)
             .or_insert_with(Entries::default)
             .add(mounts, logger)
-            .await?;
+            .await
+            .with_context(|| "Failed to add container")?;
 
         Ok(())
     }
