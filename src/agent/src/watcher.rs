@@ -46,19 +46,9 @@ impl Drop for Entry {
 
 impl Entry {
     async fn new(storage: Storage) -> Result<Entry> {
-        let source = PathBuf::from(&storage.source);
-        let mut mount_point = PathBuf::from(&storage.mount_point);
-
-        if source.is_file() && mount_point.is_dir() {
-            let filename = source.file_name().with_context(|| {
-                format!("Failed to extract file name from {}", source.display())
-            })?;
-            mount_point = mount_point.join(filename);
-        }
-
         let entry = Entry {
-            source,
-            mount_point,
+            source: PathBuf::from(&storage.source),
+            mount_point: PathBuf::from(&storage.mount_point),
             files: HashMap::new(),
         };
 
@@ -71,14 +61,23 @@ impl Entry {
         source_file_path: impl AsRef<Path>,
     ) -> Result<()> {
         let source_file_path = source_file_path.as_ref();
-        let dest_file_path = self.make_dest_path(&source_file_path)?;
 
-        if let Some(path) = dest_file_path.parent() {
-            debug!(logger, "Creating destination directory: {}", path.display());
-            fs::create_dir_all(path)
-                .await
-                .with_context(|| format!("Unable to mkdir all for {}", path.display()))?;
-        }
+        let dest_file_path = if self.source.is_file() {
+            // Simple file to file copy
+            // Assume target mount is a file path
+            self.mount_point.clone()
+        } else {
+            let dest_file_path = self.make_dest_path(&source_file_path)?;
+
+            if let Some(path) = dest_file_path.parent() {
+                debug!(logger, "Creating destination directory: {}", path.display());
+                fs::create_dir_all(path)
+                    .await
+                    .with_context(|| format!("Unable to mkdir all for {}", path.display()))?;
+            }
+
+            dest_file_path
+        };
 
         debug!(
             logger,
@@ -401,13 +400,16 @@ mod tests {
     #[tokio::test]
     async fn watch_file() {
         let source_dir = tempfile::tempdir().unwrap();
-        fs::write(source_dir.path().join("1.txt"), "one").unwrap();
+        let source_file = source_dir.path().join("1.txt");
+
+        fs::write(&source_file, "one").unwrap();
 
         let dest_dir = tempfile::tempdir().unwrap();
+        let dest_file = dest_dir.path().join("1.txt");
 
         let mut entry = Entry::new(Storage {
-            source: source_dir.path().display().to_string(),
-            mount_point: dest_dir.path().display().to_string(),
+            source: source_file.display().to_string(),
+            mount_point: dest_file.display().to_string(),
             ..Default::default()
         })
         .await
@@ -418,12 +420,9 @@ mod tests {
         assert_eq!(entry.scan(&logger).await.unwrap(), 1);
 
         thread::sleep(Duration::from_secs(1));
-        fs::write(source_dir.path().join("1.txt"), "two").unwrap();
+        fs::write(&source_file, "two").unwrap();
         assert_eq!(entry.scan(&logger).await.unwrap(), 1);
-        assert_eq!(
-            fs::read_to_string(dest_dir.path().join("1.txt")).unwrap(),
-            "two"
-        );
+        assert_eq!(fs::read_to_string(&dest_file).unwrap(), "two");
         assert_eq!(entry.scan(&logger).await.unwrap(), 0);
     }
 
