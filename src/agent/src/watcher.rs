@@ -24,6 +24,9 @@ use crate::protocols::agent::Storage;
 /// The maximum number of file system entries agent will watch for each mount.
 const MAX_ENTRIES_PER_STORAGE: usize = 8;
 
+/// The maximum size of a watchable mount in bytes.
+const MAX_SIZE_PER_WATCHABLE_MOUNT: u64 = 1024 * 1024;
+
 /// How often to check for modified files.
 const WATCH_INTERVAL_SECS: u64 = 2;
 
@@ -35,6 +38,7 @@ const WATCH_MOUNT_POINT_PATH: &str = "/run/kata-containers/shared/containers/wat
 struct Entry {
     source: PathBuf,
     mount_point: PathBuf,
+    watch: bool,
     files: HashMap<PathBuf, SystemTime>,
 }
 
@@ -49,6 +53,7 @@ impl Entry {
         let entry = Entry {
             source: PathBuf::from(&storage.source),
             mount_point: PathBuf::from(&storage.mount_point),
+            watch: true,
             files: HashMap::new(),
         };
 
@@ -122,26 +127,35 @@ impl Entry {
         }
 
         // Scan new & changed files
-        let count = self
+        let (updated_files, _size) = self
             .scan_path(logger, self.source.clone().as_path())
             .await
             .with_context(|| "Scan path failed")?;
 
-        Ok(count)
+        // Update identified files:
+        for path in &updated_files {
+            self.update_target(logger, path.as_path()).await?;
+        }
+
+        Ok(updated_files.len())
     }
 
     #[async_recursion]
-    async fn scan_path(&mut self, logger: &Logger, path: &Path) -> Result<usize> {
-        let mut count = 0;
-
+    async fn scan_path(&mut self, logger: &Logger, path: &Path) -> Result<(Vec<PathBuf>, u64)> {
+        let mut update_list: Vec<PathBuf> = Vec::new();
+        let mut size: u64 = 0;
         debug!(logger, "Scanning path: {}", path.display());
 
         if path.is_file() {
-            let modified = path
+            let metadata = path
                 .metadata()
-                .with_context(|| format!("Failed to query metadata for: {}", path.display()))?
+                .with_context(|| format!("Failed to query metadata for: {}", path.display()))?;
+
+            let modified = metadata
                 .modified()
                 .with_context(|| format!("Failed to get modified date for: {}", path.display()))?;
+
+            size += metadata.len();
 
             ensure!(
                 self.files.len() <= MAX_ENTRIES_PER_STORAGE,
@@ -152,16 +166,12 @@ impl Entry {
             // Insert will return old entry if any
             if let Some(old_st) = self.files.insert(path.to_path_buf(), modified) {
                 if modified > old_st {
-                    // Modified date changed, update target
-                    debug!(logger, "Updating file: {}", path.display());
-                    self.update_target(logger, path).await?;
-                    count += 1;
+                    update_list.push(PathBuf::from(&path))
                 }
             } else {
                 // Entry just added, copy to target
-                debug!(logger, "Copying new entry: {}", path.display());
-                self.update_target(logger, path).await?;
-                count += 1;
+                debug!(logger, "New entry: {}", path.display());
+                update_list.push(PathBuf::from(&path))
             }
         } else {
             // Scan dir recursively
@@ -171,14 +181,21 @@ impl Entry {
 
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
-                count += self
+                let (mut file_list, res_size) = self
                     .scan_path(logger, path.as_path())
                     .await
                     .with_context(|| format!("Unable to scan inner path: {}", path.display()))?;
+                update_list.append(&mut file_list);
+                size += res_size;
             }
         }
+        ensure!(
+            size <= MAX_SIZE_PER_WATCHABLE_MOUNT,
+            "Too many file system entries to watch (must be < {})",
+            MAX_SIZE_PER_WATCHABLE_MOUNT,
+        );
 
-        Ok(count)
+        Ok((update_list, size))
     }
 
     fn make_dest_path(&self, source_file_path: impl AsRef<Path>) -> Result<PathBuf> {
@@ -225,10 +242,52 @@ impl Entries {
     }
 
     async fn check(&mut self, logger: &Logger) -> Result<()> {
-        debug!(logger, "calling check");
         for entry in self.0.iter_mut() {
-            entry.scan(logger).await?;
+            if !entry.watch {
+                continue;
+            }
+
+            match entry.scan(logger).await {
+                Err(error) => {
+                    error!(logger, "error observed when watching: {:?}", error);
+                    entry.watch = false;
+
+                    // TODO: verify that we aren't going to break
+                    // if it is a file, not a directory. In that case, no need to
+                    // hit the for loop...
+
+                    // Remove destination contents, but not the directory itself, since this is
+                    // assumed to be bind-mounted into a container
+                    if entry.mount_point.as_path().is_dir() {
+                        for dentry in std::fs::read_dir(entry.mount_point.as_path())? {
+                            let dentry = dentry?;
+                            let path = dentry.path();
+                            if dentry.file_type()?.is_dir() {
+                                std::fs::remove_dir_all(path)?;
+                            } else {
+                                std::fs::remove_file(path)?;
+                            }
+                        }
+                    }
+
+                    //  - Create bind mount from source to destination
+                    BareMount::new(
+                        entry.source.to_str().unwrap(),
+                        entry.mount_point.to_str().unwrap(),
+                        "bind",
+                        MsFlags::MS_BIND,
+                        "bind",
+                        logger,
+                    )
+                    .mount()
+                    .unwrap();
+                }
+                Ok(count) => {
+                    debug!(logger, "watched {} files", count);
+                }
+            };
         }
+
         Ok(())
     }
 }
@@ -352,6 +411,185 @@ mod tests {
     use crate::skip_if_not_root;
     use std::fs;
     use std::thread;
+
+    #[tokio::test]
+    async fn watch_entries() {
+        skip_if_not_root!();
+
+        // If there's an error with an entry, let's make sure it is removed, and that the
+        // mount-destination behaves like a standard bind-mount.
+
+        // Create an entries vector with three storage objects: storage, storage1, storage2.
+        // We'll first verify each are evaluated correctly, then increase the first entry's contents
+        // so it fails mount size check (>1MB) (test handling for failure on mount that is a directory).
+        // We'll then similarly cause failure with storage2 (test handling for failure on mount that is
+        // a single file). We'll then verify that storage1 continues to be watchable.
+        let source_dir = tempfile::tempdir().unwrap();
+        let dest_dir = tempfile::tempdir().unwrap();
+
+        let storage = Storage {
+            source: source_dir.path().display().to_string(),
+            mount_point: dest_dir.path().display().to_string(),
+            ..Default::default()
+        };
+        std::fs::File::create(source_dir.path().join("small.txt"))
+            .unwrap()
+            .set_len(10)
+            .unwrap();
+
+        let source_dir1 = tempfile::tempdir().unwrap();
+        let dest_dir1 = tempfile::tempdir().unwrap();
+        let storage1 = Storage {
+            source: source_dir1.path().display().to_string(),
+            mount_point: dest_dir1.path().display().to_string(),
+            ..Default::default()
+        };
+        std::fs::File::create(source_dir1.path().join("large.txt"))
+            .unwrap()
+            .set_len(1 * 1024 * 1024)
+            .unwrap();
+
+        // And finally, create a single file mount:
+        let source_dir2 = tempfile::tempdir().unwrap();
+        let dest_dir2 = tempfile::tempdir().unwrap();
+
+        let source_path = source_dir2.path().join("mounted-file");
+        let dest_path = dest_dir2.path().join("mounted-file");
+        let mounted_file = std::fs::File::create(&source_path).unwrap();
+        mounted_file.set_len(1 * 1024 * 1024).unwrap();
+
+        let storage2 = Storage {
+            source: source_path.display().to_string(),
+            mount_point: dest_path.display().to_string(),
+            ..Default::default()
+        };
+
+        let logger = slog::Logger::root(slog::Discard, o!());
+
+        let mut entries = Entries {
+            ..Default::default()
+        };
+
+        entries
+            .add(std::iter::once(storage), &logger)
+            .await
+            .unwrap();
+
+        entries
+            .add(std::iter::once(storage1), &logger)
+            .await
+            .unwrap();
+
+        entries
+            .add(std::iter::once(storage2), &logger)
+            .await
+            .unwrap();
+
+        // Check that there are three entries, and that the
+        // destination (mount point) matches what we expect for
+        // the first:
+        assert!(entries.check(&logger).await.is_ok());
+        assert_eq!(entries.0.len(), 3);
+        assert_eq!(std::fs::read_dir(dest_dir.path()).unwrap().count(), 1);
+
+        // Add a second file which will trip file size check:
+        std::fs::File::create(source_dir.path().join("big.txt"))
+            .unwrap()
+            .set_len(1 * 1024 * 1024)
+            .unwrap();
+
+        assert!(entries.check(&logger).await.is_ok());
+
+        // Verify Entry 0 is no longer going to be watched:
+        assert!(!entries.0[0].watch);
+
+        // Verify that the directory has two entries:
+        assert_eq!(std::fs::read_dir(dest_dir.path()).unwrap().count(), 2);
+
+        // Verify that the directory is a bind mount. Add an entry without calling check,
+        // and verify that the destination directory includes these files in the case of
+        // mount that is no longer being watched (storage), but not within the still-being
+        // watched (storage1):
+        fs::write(source_dir.path().join("1.txt"), "updated").unwrap();
+        fs::write(source_dir1.path().join("2.txt"), "updated").unwrap();
+
+        assert_eq!(std::fs::read_dir(source_dir.path()).unwrap().count(), 3);
+        assert_eq!(std::fs::read_dir(dest_dir.path()).unwrap().count(), 3);
+        assert_eq!(std::fs::read_dir(source_dir1.path()).unwrap().count(), 2);
+        assert_eq!(std::fs::read_dir(dest_dir1.path()).unwrap().count(), 1);
+
+        // Verify that storage1 is still working. After running check, we expect that the number
+        // of entries to increment
+        assert!(entries.check(&logger).await.is_ok());
+        assert_eq!(std::fs::read_dir(dest_dir1.path()).unwrap().count(), 2);
+
+        // Break storage2 by increasing the file size
+        mounted_file.set_len(1 * 1024 * 1024 + 10).unwrap();
+        assert!(entries.check(&logger).await.is_ok());
+        // Verify Entry 2 is no longer going to be watched:
+        assert!(!entries.0[2].watch);
+
+        // Verify bind mount is working -- let's write to the file and observe output:
+        fs::write(&source_path, "updated").unwrap();
+        assert_eq!(fs::read_to_string(&source_path).unwrap(), "updated");
+    }
+
+    #[tokio::test]
+    async fn watch_directory_too_large() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let dest_dir = tempfile::tempdir().unwrap();
+        let mut entry = Entry::new(Storage {
+            source: source_dir.path().display().to_string(),
+            mount_point: dest_dir.path().display().to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        let logger = slog::Logger::root(slog::Discard, o!());
+
+        // Create a file that is too large:
+        std::fs::File::create(source_dir.path().join("big.txt"))
+            .unwrap()
+            .set_len(1 * 1024 * 1024 + 1)
+            .unwrap();
+        thread::sleep(Duration::from_secs(1));
+        assert!(entry.scan(&logger).await.is_err());
+        fs::remove_file(source_dir.path().join("big.txt")).unwrap();
+
+        std::fs::File::create(source_dir.path().join("big.txt"))
+            .unwrap()
+            .set_len(1 * 1024 * 1024 - 1)
+            .unwrap();
+        thread::sleep(Duration::from_secs(1));
+        assert!(entry.scan(&logger).await.is_ok());
+
+        std::fs::File::create(source_dir.path().join("too-big.txt"))
+            .unwrap()
+            .set_len(2)
+            .unwrap();
+        thread::sleep(Duration::from_secs(1));
+        assert!(entry.scan(&logger).await.is_err());
+
+        fs::remove_file(source_dir.path().join("big.txt")).unwrap();
+        fs::remove_file(source_dir.path().join("too-big.txt")).unwrap();
+
+        // Up to eight files should be okay:
+        fs::write(source_dir.path().join("1.txt"), "updated").unwrap();
+        fs::write(source_dir.path().join("2.txt"), "updated").unwrap();
+        fs::write(source_dir.path().join("3.txt"), "updated").unwrap();
+        fs::write(source_dir.path().join("4.txt"), "updated").unwrap();
+        fs::write(source_dir.path().join("5.txt"), "updated").unwrap();
+        fs::write(source_dir.path().join("6.txt"), "updated").unwrap();
+        fs::write(source_dir.path().join("7.txt"), "updated").unwrap();
+        fs::write(source_dir.path().join("8.txt"), "updated").unwrap();
+        assert_eq!(entry.scan(&logger).await.unwrap(), 8);
+
+        // Nine files is too many:
+        fs::write(source_dir.path().join("9.txt"), "updated").unwrap();
+        thread::sleep(Duration::from_secs(1));
+        assert!(entry.scan(&logger).await.is_err());
+    }
 
     #[tokio::test]
     async fn watch_directory() {
