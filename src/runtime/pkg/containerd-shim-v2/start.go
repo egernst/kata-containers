@@ -42,7 +42,7 @@ func startContainer(ctx context.Context, s *service, c *container) (retErr error
 		s.monitor, err = s.sandbox.Monitor(ctx)
 		if err != nil {
 			return err
-		}
+			}
 		go watchSandbox(ctx, s)
 
 		// We use s.ctx(`ctx` derived from `s.ctx`) to check for cancellation of the

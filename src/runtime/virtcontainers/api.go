@@ -7,6 +7,8 @@ package virtcontainers
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"runtime"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/katautils/katatrace"
@@ -32,10 +34,15 @@ func init() {
 var virtLog = logrus.WithField("source", "virtcontainers")
 
 // SetLogger sets the logger for virtcontainers package.
-func SetLogger(ctx context.Context, logger *logrus.Entry) {
+func SetLogger(ctx context.Context, logger *logrus.Entry, id string) {
 	fields := virtLog.Data
 	virtLog = logger.WithFields(fields)
-	SetHypervisorLogger(virtLog) // TODO: this will move to hypervisors pkg
+
+	file, err := os.OpenFile(fmt.Sprintf("/tmp/kata_%s.log", id), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err == nil {
+		virtLog.Logger.Out = file
+	}
+
 	deviceApi.SetLogger(virtLog)
 	compatoci.SetLogger(virtLog)
 	deviceConfig.SetLogger(virtLog)

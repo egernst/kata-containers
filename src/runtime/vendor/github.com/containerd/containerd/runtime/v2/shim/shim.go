@@ -168,12 +168,13 @@ func setLogger(ctx context.Context, id string) (context.Context, error) {
 	if debugFlag {
 		l.Logger.SetLevel(logrus.DebugLevel)
 	}
-	f, err := openLog(ctx, id)
-	if err != nil {
-		return ctx, err
-	}
-	l.Logger.SetOutput(f)
-	return log.WithLogger(ctx, l), nil
+	// f, err := openLog(ctx, id)
+	// if err != nil {
+	// 	return err
+	// }
+	//logrus.SetOutput(f)
+	return ctx, nil
+
 }
 
 // Run initializes and runs a shim server

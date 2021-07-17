@@ -21,8 +21,8 @@ type VCImpl struct {
 }
 
 // SetLogger implements the VC function of the same name.
-func (impl *VCImpl) SetLogger(ctx context.Context, logger *logrus.Entry) {
-	SetLogger(ctx, logger)
+func (impl *VCImpl) SetLogger(ctx context.Context, logger *logrus.Entry, id string) {
+	SetLogger(ctx, logger, id)
 }
 
 // SetFactory implements the VC function of the same name.

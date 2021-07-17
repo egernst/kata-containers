@@ -20,7 +20,7 @@ import (
 
 // VC is the Virtcontainers interface
 type VC interface {
-	SetLogger(ctx context.Context, logger *logrus.Entry)
+	SetLogger(ctx context.Context, logger *logrus.Entry, id string)
 	SetFactory(ctx context.Context, factory Factory)
 
 	CreateSandbox(ctx context.Context, sandboxConfig SandboxConfig) (VCSandbox, error)

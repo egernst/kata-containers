@@ -80,7 +80,9 @@ func New(ctx context.Context, id string, publisher cdshim.Publisher, shutdown fu
 	if !opts.Debug {
 		logrus.SetLevel(logrus.WarnLevel)
 	}
-	vci.SetLogger(ctx, shimLog)
+
+	logrus.SetLevel(logrus.DebugLevel)
+	vci.SetLogger(ctx, shimLog, id)
 	katautils.SetLogger(ctx, shimLog, shimLog.Logger.Level)
 
 	s := &service{

@@ -198,7 +198,7 @@ func setupSignalHandler(ctx context.Context) {
 // packages which accept a logger to handle their own logging.
 func setExternalLoggers(ctx context.Context, logger *logrus.Entry) {
 	// Set virtcontainers logger.
-	vci.SetLogger(ctx, logger)
+	vci.SetLogger(ctx, logger, "sb")
 
 	// Set vm factory logger.
 	vf.SetLogger(ctx, logger)
