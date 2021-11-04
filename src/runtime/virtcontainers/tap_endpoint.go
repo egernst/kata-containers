@@ -14,7 +14,7 @@ import (
 
 	persistapi "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/persist/api"
 	vcTypes "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/types"
-	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/uuid"
+	"github.com/kata-containers/kata-containers/src/runtime/pkg/uuid"
 )
 
 var tapTrace = getNetworkTrace(TapEndpointType)
