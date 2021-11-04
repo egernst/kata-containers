@@ -25,9 +25,9 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/katautils/katatrace"
+	"github.com/kata-containers/kata-containers/src/runtime/pkg/uuid"
 	pbTypes "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/agent/protocols"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/rootless"
-	"github.com/kata-containers/kata-containers/src/runtime/pkg/uuid"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/utils"
 )
 
@@ -251,7 +251,7 @@ func getLinkForEndpoint(endpoint Endpoint, netHandle *netlink.Handle) (netlink.L
 	switch ep := endpoint.(type) {
 	case *VethEndpoint:
 		link = &netlink.Veth{}
-	case *BridgedMacvlanEndpoint:
+	case *MacvlanEndpoint:
 		link = &netlink.Macvlan{}
 	case *IPVlanEndpoint:
 		link = &netlink.IPVlan{}
@@ -1127,7 +1127,7 @@ func createEndpoint(netInfo NetworkInfo, idx int, model NetInterworkingModel, li
 			endpoint, err = createVhostUserEndpoint(netInfo, socketPath)
 		} else if netInfo.Iface.Type == "macvlan" {
 			networkLogger().Infof("macvlan interface found")
-			endpoint, err = createBridgedMacvlanNetworkEndpoint(idx, netInfo.Iface.Name, model)
+			endpoint, err = createMacvlanNetworkEndpoint(idx, netInfo.Iface.Name, model)
 		} else if netInfo.Iface.Type == "macvtap" {
 			networkLogger().Infof("macvtap interface found")
 			endpoint, err = createMacvtapNetworkEndpoint(netInfo)
@@ -1330,7 +1330,7 @@ func (n *Network) Remove(ctx context.Context, ns *NetworkNamespace, hypervisor H
 func addRxRateLimiter(endpoint Endpoint, maxRate uint64) error {
 	var linkName string
 	switch ep := endpoint.(type) {
-	case *VethEndpoint, *IPVlanEndpoint, *TuntapEndpoint, *BridgedMacvlanEndpoint:
+	case *VethEndpoint, *IPVlanEndpoint, *TuntapEndpoint, *MacvlanEndpoint:
 		netPair := endpoint.NetworkPair()
 		linkName = netPair.TapInterface.TAPIface.Name
 	case *MacvtapEndpoint, *TapEndpoint:
@@ -1486,7 +1486,7 @@ func addTxRateLimiter(endpoint Endpoint, maxRate uint64) error {
 	var netPair *NetworkInterfacePair
 	var linkName string
 	switch ep := endpoint.(type) {
-	case *VethEndpoint, *IPVlanEndpoint, *TuntapEndpoint, *BridgedMacvlanEndpoint:
+	case *VethEndpoint, *IPVlanEndpoint, *TuntapEndpoint, *MacvlanEndpoint:
 		netPair = endpoint.NetworkPair()
 		switch netPair.NetInterworkingModel {
 		// For those endpoints we've already used tcfilter as their inter-networking model,
@@ -1559,7 +1559,7 @@ func removeHTBQdisc(linkName string) error {
 func removeRxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 	var linkName string
 	switch ep := endpoint.(type) {
-	case *VethEndpoint, *IPVlanEndpoint, *TuntapEndpoint, *BridgedMacvlanEndpoint:
+	case *VethEndpoint, *IPVlanEndpoint, *TuntapEndpoint, *MacvlanEndpoint:
 		netPair := endpoint.NetworkPair()
 		linkName = netPair.TapInterface.TAPIface.Name
 	case *MacvtapEndpoint, *TapEndpoint:
@@ -1580,7 +1580,7 @@ func removeRxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 func removeTxRateLimiter(endpoint Endpoint, networkNSPath string) error {
 	var linkName string
 	switch ep := endpoint.(type) {
-	case *VethEndpoint, *IPVlanEndpoint, *TuntapEndpoint, *BridgedMacvlanEndpoint:
+	case *VethEndpoint, *IPVlanEndpoint, *TuntapEndpoint, *MacvlanEndpoint:
 		netPair := endpoint.NetworkPair()
 		switch netPair.NetInterworkingModel {
 		case NetXConnectTCFilterModel:
