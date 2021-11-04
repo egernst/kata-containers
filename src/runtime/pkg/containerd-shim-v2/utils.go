@@ -18,7 +18,7 @@ import (
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/katautils"
 	vc "github.com/kata-containers/kata-containers/src/runtime/virtcontainers"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/compatoci"
-	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/oci"
+	"github.com/kata-containers/kata-containers/src/runtime/pkg/oci"
 )
 
 func cReap(s *service, status int, id, execid string, exitat time.Time) {

@@ -23,7 +23,7 @@ import (
 	exp "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/experimental"
 	vf "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/factory"
 	tl "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/factory/template"
-	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/oci"
+	"github.com/kata-containers/kata-containers/src/runtime/pkg/oci"
 	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/rootless"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/sirupsen/logrus"

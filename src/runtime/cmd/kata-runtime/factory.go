@@ -19,7 +19,7 @@ import (
 	pb "github.com/kata-containers/kata-containers/src/runtime/protocols/cache"
 	vc "github.com/kata-containers/kata-containers/src/runtime/virtcontainers"
 	vf "github.com/kata-containers/kata-containers/src/runtime/virtcontainers/factory"
-	"github.com/kata-containers/kata-containers/src/runtime/virtcontainers/pkg/oci"
+	"github.com/kata-containers/kata-containers/src/runtime/pkg/oci"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 	"golang.org/x/sys/unix"
