@@ -38,7 +38,7 @@ func runHook(ctx context.Context, spec specs.Spec, hook specs.Hook, cid, bundleP
 	katatrace.AddTags(span, "path", hook.Path, "args", hook.Args)
 
 	state := specs.State{
-		Pid:         syscall.Gettid(),
+		Pid:         syscall.Getpid(),
 		Bundle:      bundlePath,
 		ID:          cid,
 		Annotations: spec.Annotations,
