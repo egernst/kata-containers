@@ -60,11 +60,13 @@ jobs:
 
       - name: Install docker
         run: |
+          echo "foo my bar -- I am being exercised, how nice!"
           curl -fsSL https://test.docker.com -o test-docker.sh
           sh test-docker.sh
 
       - name: Build ${{ matrix.asset }}
         run: |
+          echo "foo my bar -- I am being exercised, interesting!"
           make "${KATA_ASSET}-tarball"
           build_dir=$(readlink -f build)
           # store-artifact does not work with symlink

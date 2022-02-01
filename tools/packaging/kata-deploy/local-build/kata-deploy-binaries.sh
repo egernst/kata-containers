@@ -196,6 +196,7 @@ handle_build() {
 }
 
 main() {
+        die "foobar indeed!"
 	local build_targets
 	local silent
 	build_targets=(
