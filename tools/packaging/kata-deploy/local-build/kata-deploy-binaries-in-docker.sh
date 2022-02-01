@@ -10,6 +10,11 @@ set -o nounset
 set -o pipefail
 set -o errtrace
 
+
+echo "TESTING: KILL THE BUILD BEFORE IT EVEN STARTS!"
+exit 1
+
+
 script_dir=$(dirname "$(readlink -f "$0")")
 kata_dir=$(realpath "${script_dir}/../../../../")
 kata_deploy_create="${script_dir}/kata-deploy-binaries.sh"
