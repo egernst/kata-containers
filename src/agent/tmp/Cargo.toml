@@ -1,0 +1,10 @@
+[package]
+name = "ipt"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+#iptables = "0.5.0"
+rust-iptables = "0.0.2"
