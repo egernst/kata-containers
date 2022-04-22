@@ -23,8 +23,9 @@ use cgroups::freezer::FreezerState;
 use oci::{LinuxNamespace, Root, Spec};
 use protobuf::{Message, RepeatedField, SingularPtrField};
 use protocols::agent::{
-    AddSwapRequest, AgentDetails, CopyFileRequest, GuestDetailsResponse, Interfaces, Metrics,
-    OOMEvent, ReadStreamResponse, Routes, StatsContainerResponse, VolumeStatsRequest,
+    AddSwapRequest, AgentDetails, CopyFileRequest, GetIPTablesRequest, GetIPTablesResponse,
+    GuestDetailsResponse, Interfaces, Metrics, OOMEvent, ReadStreamResponse, Routes,
+    SetIPTablesRequest, SetIPTablesResponse, StatsContainerResponse, VolumeStatsRequest,
     WaitProcessResponse, WriteStreamResponse,
 };
 use protocols::csi::{VolumeCondition, VolumeStatsResponse, VolumeUsage, VolumeUsage_Unit};
@@ -78,7 +79,7 @@ use std::time::Duration;
 
 use nix::unistd::{Gid, Uid};
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 
@@ -993,6 +994,102 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
 
         Ok(protocols::agent::Routes {
             Routes: RepeatedField::from_vec(list),
+            ..Default::default()
+        })
+    }
+
+    async fn get_ip_tables(
+        &self,
+        ctx: &TtrpcContext,
+        req: GetIPTablesRequest,
+    ) -> ttrpc::Result<GetIPTablesResponse> {
+        trace_rpc_call!(ctx, "get_iptables", req);
+        is_allowed!(req);
+
+        let mut cmd = "iptables-save";
+        if req.is_ipv6 {
+            cmd = "ip6tables-save";
+        }
+
+        match Command::new(cmd).output() {
+            Ok(output) => Ok(GetIPTablesResponse {
+                data: output.stdout,
+                ..Default::default()
+            }),
+            Err(e) => {
+                warn!(sl!(), "failed to run {}: {:?}", cmd, e.kind());
+                Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
+                //return Err(ttrpc_error!(ttrpc::Code::INTERNAL, e));
+            }
+        }
+    }
+
+    async fn set_ip_tables(
+        &self,
+        ctx: &TtrpcContext,
+        req: SetIPTablesRequest,
+    ) -> ttrpc::Result<SetIPTablesResponse> {
+        trace_rpc_call!(ctx, "set_iptables", req);
+        is_allowed!(req);
+
+        let mut cmd = "iptables-restore";
+        if req.is_ipv6 {
+            cmd = "ip6tables-restore";
+        }
+
+        let mut child = Command::new(cmd)
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                warn!(sl!(), "failed to run {}: {:?}", cmd, e.kind());
+                ttrpc_error!(ttrpc::Code::INTERNAL, e)
+            })?;
+
+        //        let mut stdin = child.stdin.take().expect("");
+        let mut stdin = match child.stdin.take() {
+            Some(si) => si,
+            None => {
+                warn!(sl!(), "failed to get stdin from child: {}", cmd);
+                return Err(ttrpc_error!(
+                    ttrpc::Code::INTERNAL,
+                    format!("Failed to get stdin from child: {}", cmd)
+                ));
+            }
+        };
+
+
+        let _handle = tokio::spawn(async move {
+            let _result = match stdin.write_all(&*req.data) {
+                Ok(s) => Ok(s),
+                Err(e) => {
+                    // probably want to make sure we kill the spawned?
+                    warn!(sl!(), "failed to write stdin for {}: {:?}", cmd, e.kind());
+                    Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
+                }
+            };
+        });
+       /*
+        std::thread::spawn(move || {
+            match stdin.write_all(&*req.data) {
+                Ok(s) => Ok(s),
+                Err(e) => {
+                    // probably want to make sure we kill the spawned?
+                    warn!(sl!(), "failed to write stdin for {}: {:?}", cmd, e.kind());
+                    Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
+                }
+            };
+        });
+*/
+        let output = match child.wait_with_output() {
+            Ok(o) => o,
+            Err(e) => {
+                warn!(sl!(), "failed to write stdin for {}: {:?}", cmd, e.kind());
+                return Err(ttrpc_error!(ttrpc::Code::INTERNAL, e));
+            }
+        };
+
+        Ok(SetIPTablesResponse {
+            data: output.stdout,
             ..Default::default()
         })
     }
@@ -2749,4 +2846,8 @@ OtherField:other
             }
         }
     }
+
+
+    #[tokio::test]
+    async fn test_get_ip_tables() {}
 }
