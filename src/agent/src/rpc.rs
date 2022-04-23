@@ -1032,66 +1032,31 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "set_iptables", req);
         is_allowed!(req);
 
-        let mut cmd = "iptables-restore";
-        if req.is_ipv6 {
-            cmd = "ip6tables-restore";
+        let mut ipt = String::from("");
+        if req.data.len() > 0  {
+             ipt = String::from_utf8(req.data.clone()).unwrap();
         }
 
-        let mut child = Command::new(cmd)
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                warn!(sl!(), "failed to run {}: {:?}", cmd, e.kind());
-                ttrpc_error!(ttrpc::Code::INTERNAL, e)
-            })?;
+        let mut cmd = "iptables-restore";
+        if req.is_ipv6 {
+            cmd = "ip6tables-restore"
+        }
 
-        //        let mut stdin = child.stdin.take().expect("");
-        let mut stdin = match child.stdin.take() {
-            Some(si) => si,
-            None => {
-                warn!(sl!(), "failed to get stdin from child: {}", cmd);
-                return Err(ttrpc_error!(
-                    ttrpc::Code::INTERNAL,
-                    format!("Failed to get stdin from child: {}", cmd)
-                ));
-            }
-        };
+        let run =  format!("echo \"{}\"", ipt);
+        //let run =  format!("echo \"{}\" | {}", ipt, cmd);
+        println!("about to execute \n{}", run);
 
 
-        let _handle = tokio::spawn(async move {
-            let _result = match stdin.write_all(&*req.data) {
-                Ok(s) => Ok(s),
-                Err(e) => {
-                    // probably want to make sure we kill the spawned?
-                    warn!(sl!(), "failed to write stdin for {}: {:?}", cmd, e.kind());
-                    Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
-                }
-            };
-        });
-       /*
-        std::thread::spawn(move || {
-            match stdin.write_all(&*req.data) {
-                Ok(s) => Ok(s),
-                Err(e) => {
-                    // probably want to make sure we kill the spawned?
-                    warn!(sl!(), "failed to write stdin for {}: {:?}", cmd, e.kind());
-                    Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
-                }
-            };
-        });
-*/
-        let output = match child.wait_with_output() {
-            Ok(o) => o,
+        match Command::new(&run).output() {
+            Ok(output) => Ok(SetIPTablesResponse {
+                ..Default::default()
+            }),
             Err(e) => {
-                warn!(sl!(), "failed to write stdin for {}: {:?}", cmd, e.kind());
-                return Err(ttrpc_error!(ttrpc::Code::INTERNAL, e));
+                println!("oh lawd here we go, an error");
+                warn!(sl!(), "failed to run {}: {:?}", &run, e.kind());
+                Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
             }
-        };
-
-        Ok(SetIPTablesResponse {
-            data: output.stdout,
-            ..Default::default()
-        })
+        }
     }
 
     async fn list_interfaces(
@@ -1992,6 +1957,7 @@ fn load_kernel_module(module: &protocols::agent::KernelModule) -> Result<()> {
 mod tests {
     use super::*;
     use crate::{assert_result, namespace::Namespace, protocols::agent_ttrpc::AgentService as _};
+    use nix::sched::{unshare, CloneFlags};
     use oci::{Hook, Hooks, Linux, LinuxNamespace};
     use tempfile::{tempdir, TempDir};
     use ttrpc::{r#async::TtrpcContext, MessageHeader};
@@ -2847,7 +2813,79 @@ OtherField:other
         }
     }
 
-
     #[tokio::test]
-    async fn test_get_ip_tables() {}
+    async fn test_get_ip_tables() {
+        let logger = slog::Logger::root(slog::Discard, o!());
+        let sandbox = Sandbox::new(&logger).unwrap();
+        let agent_service = Box::new(AgentService {
+            sandbox: Arc::new(Mutex::new(sandbox)),
+        });
+
+        let req = protocols::agent::GetIPTablesRequest::default();
+        let ctx = mk_ttrpc_context();
+
+        //       let _handle = tokio::spawn(async move {
+
+        // Verify no IPTables:
+
+        unshare(CloneFlags::CLONE_NEWNET).unwrap();
+
+        let result = agent_service
+            .get_ip_tables(
+                &ctx,
+                GetIPTablesRequest {
+                    is_ipv6: false,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        // Verify no IPTables to start:
+        let buf = result.data;
+        assert_eq!(buf.len(), 0);
+
+        println!("OK, empty to start - let's set a rule");
+
+        // Setup an iptable:
+        let rules = r#"
+*nat
+-A PREROUTING -d 192.168.103.153/32 -j DNAT --to-destination 192.168.188.153
+
+COMMIT
+
+"#;
+
+        // Set ip tables:
+        let result = agent_service
+            .set_ip_tables(
+                &ctx,
+                SetIPTablesRequest {
+                    is_ipv6: false,
+                    data: rules.as_bytes().to_vec(),
+                    //data: buf,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        println!("OK, let's check what we set");
+
+        let result = agent_service
+            .get_ip_tables(
+                &ctx,
+                GetIPTablesRequest {
+                    is_ipv6: false,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(rules, String::from_utf8(result.data.clone()).unwrap());
+
+        println!("at end...original thread");
+    }
 }
+
+//let thestr = "*NAT\
+//-A PREROUTING -d 192.168.103.153/32 -j DNAT --to-destination 192.168.188.153"
