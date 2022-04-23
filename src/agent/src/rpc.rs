@@ -1032,9 +1032,8 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "set_iptables", req);
         is_allowed!(req);
 
-        let mut ipt = String::from("");
-        if req.data.len() > 0  {
-             ipt = String::from_utf8(req.data.clone()).unwrap();
+        if req.data.len() == 0  {
+            return Err(ttrpc_error!(ttrpc::Code::INTERNAL,format!("nothing provided huh")));
         }
 
         let mut cmd = "iptables-restore";
@@ -1063,9 +1062,14 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
         };
 
 
+        println!("requested data: {:?}",req);
+
         let _handle = tokio::spawn(async move {
             let _result = match stdin.write_all(&*req.data) {
-                Ok(s) => Ok(s),
+                Ok(s) => {
+                    println!("okay, we wrote it");
+                    Ok(s) 
+                }
                 Err(e) => {
                     // probably want to make sure we kill the spawned?
                     warn!(sl!(), "failed to write stdin for {}: {:?}", cmd, e.kind());
@@ -1074,13 +1078,20 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
             };
         });
         let output = match child.wait_with_output() {
-            Ok(o) => o,
+            Ok(o) => {
+                println!("oh yea, waited..");
+            },
             Err(e) => {
                 println!("oh lawd here we go, an error");
-                warn!(sl!(), "failed to run {}: {:?}", &run, e.kind());
-                Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
+                warn!(sl!(), "failed to run {}: {:?}", cmd, e.kind());
+                return Err(ttrpc_error!(ttrpc::Code::INTERNAL, e));
             }
-        }
+        };
+        Ok(SetIPTablesResponse {
+//            data: output.stdout,
+            ..Default::default()
+        })
+
     }
 
     async fn list_interfaces(
