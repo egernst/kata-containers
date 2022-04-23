@@ -1042,15 +1042,39 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
             cmd = "ip6tables-restore"
         }
 
-        let run =  format!("echo \"{}\"", ipt);
-        //let run =  format!("echo \"{}\" | {}", ipt, cmd);
-        println!("about to execute \n{}", run);
+        let mut child = Command::new(cmd)
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                warn!(sl!(), "failed to run {}: {:?}", cmd, e.kind());
+                ttrpc_error!(ttrpc::Code::INTERNAL, e)
+            })?;
+
+        //        let mut stdin = child.stdin.take().expect("");
+        let mut stdin = match child.stdin.take() {
+            Some(si) => si,
+            None => {
+                warn!(sl!(), "failed to get stdin from child: {}", cmd);
+                return Err(ttrpc_error!(
+                    ttrpc::Code::INTERNAL,
+                    format!("Failed to get stdin from child: {}", cmd)
+                ));
+            }
+        };
 
 
-        match Command::new(&run).output() {
-            Ok(output) => Ok(SetIPTablesResponse {
-                ..Default::default()
-            }),
+        let _handle = tokio::spawn(async move {
+            let _result = match stdin.write_all(&*req.data) {
+                Ok(s) => Ok(s),
+                Err(e) => {
+                    // probably want to make sure we kill the spawned?
+                    warn!(sl!(), "failed to write stdin for {}: {:?}", cmd, e.kind());
+                    Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
+                }
+            };
+        });
+        let output = match child.wait_with_output() {
+            Ok(o) => o,
             Err(e) => {
                 println!("oh lawd here we go, an error");
                 warn!(sl!(), "failed to run {}: {:?}", &run, e.kind());
