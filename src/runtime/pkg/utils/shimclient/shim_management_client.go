@@ -65,6 +65,25 @@ func DoGet(sandboxID string, timeoutInSeconds time.Duration, urlPath string) ([]
 	return body, nil
 }
 
+func DoPut(sandboxID string, timeoutInSeconds time.Duration, urlPath, contentType string, payload []byte) error {
+	client, err := BuildShimClient(sandboxID, timeoutInSeconds)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, urlPath, bytes.NewBuffer(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", contentType)
+
+	resp, err := client.Do(req)
+	defer func() {
+		resp.Body.Close()
+	}()
+	return err
+}
+
 func DoPost(sandboxID string, timeoutInSeconds time.Duration, urlPath string, payload []byte) error {
 	client, err := BuildShimClient(sandboxID, timeoutInSeconds)
 	if err != nil {
