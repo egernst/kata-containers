@@ -187,11 +187,11 @@ func (s *service) serveVolumeResize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *service) ip6TablesHandler(w http.ResponseWriter, r *http.Request) {
-	generticIPTablesHandler(w, r, true)
+	genericIPTablesHandler(w, r, true)
 }
 
 func (s *service) ipTablesHandler(w http.ResponseWriter, r *http.Request) {
-	generticIPTablesHandler(w, r, false)
+	genericIPTablesHandler(w, r, false)
 }
 
 func (s *service) genericIPTablesHandler(w http.ResponseWriter, r *http.Request, isIPv6 bool) {
