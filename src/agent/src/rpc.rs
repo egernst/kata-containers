@@ -1008,6 +1008,7 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "get_iptables", req);
         is_allowed!(req);
 
+        info!(sl!(), "set_ip_tables: request: {:?}", req);
         let mut cmd = "iptables-save";
         if req.is_ipv6 {
             cmd = "ip6tables-save";
