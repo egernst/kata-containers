@@ -35,6 +35,7 @@ const (
 	DirectVolumeStatUrl   = "/direct-volume/stats"
 	DirectVolumeResizeUrl = "/direct-volume/resize"
 	IPTablesUrl           = "/iptables"
+	IP6TablesUrl          = "/ip6tables"
 )
 
 var (
@@ -185,15 +186,39 @@ func (s *service) serveVolumeResize(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(""))
 }
 
+func (s *service) ip6TablesHandler(w http.ResponseWriter, r *http.Request) {
+	generticIPTablesHandler(w, r, true)
+}
+
 func (s *service) ipTablesHandler(w http.ResponseWriter, r *http.Request) {
-	body, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		shimMgtLog.WithError(err).Error("failed to read request body")
-		w.WriteHeader(http.StatusInternalServerError)
+	generticIPTablesHandler(w, r, false)
+}
+
+func (s *service) genericIPTablesHandler(w http.ResponseWriter, r *http.Request, isIPv6 bool) {
+	switch r.Method {
+	case "PUT":
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			shimMgtLog.WithError(err).Error("failed to read request body")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		// ok - let's go ahead and call the sandbox api to reach out to the agent:
+		// TODO: function to cal lthe agent... sigh...
+
+		fmt.Println("a put, how neat")
+		w.Write([]byte(""))
+	case "GET":
+		// TODO
+		//buf, err := s.sandbox.GetIPTables(context.Background())
+		//w.Write(buf)
+	default:
+		w.WriteHeader(http.StatusNotImplemented)
 		w.Write([]byte(err.Error()))
 		return
 	}
-	w.Write([]byte(""))
 }
 
 func (s *service) startManagementServer(ctx context.Context, ociSpec *specs.Spec) {
@@ -221,6 +246,7 @@ func (s *service) startManagementServer(ctx context.Context, ociSpec *specs.Spec
 	m.Handle(DirectVolumeStatUrl, http.HandlerFunc(s.serveVolumeStats))
 	m.Handle(DirectVolumeResizeUrl, http.HandlerFunc(s.serveVolumeResize))
 	m.Handle(IPTablesUrl, http.HandlerFunc(s.ipTablesHandler))
+	m.Handle(IP6TablesUrl, http.HandlerFunc(s.ip6TablesHandler))
 	s.mountPprofHandle(m, ociSpec)
 
 	// register shim metrics
