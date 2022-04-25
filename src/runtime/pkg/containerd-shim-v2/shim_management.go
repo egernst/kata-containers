@@ -160,6 +160,7 @@ func (s *service) serveVolumeStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *service) serveVolumeResize(w http.ResponseWriter, r *http.Request) {
+	shimMgtLog.Debug("resize called:  ", r.Method)
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		shimMgtLog.WithError(err).Error("failed to read request body")
@@ -187,17 +188,21 @@ func (s *service) serveVolumeResize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *service) ip6TablesHandler(w http.ResponseWriter, r *http.Request) {
+	shimMgtLog.Debug("ip6tables handler - called, method is: ", r.Method)
 	s.genericIPTablesHandler(w, r, true)
 }
 
 func (s *service) ipTablesHandler(w http.ResponseWriter, r *http.Request) {
+	shimMgtLog.Debug("iptables handler - called, method is: ", r.Method)
 	s.genericIPTablesHandler(w, r, false)
 }
 
 func (s *service) genericIPTablesHandler(w http.ResponseWriter, r *http.Request, isIPv6 bool) {
-	shimMgtLog.Debug("Generic IPTables http handler called")
+	shimMgtLog.Debug("Generic IPTables http handler called, method is: ", r.Method)
 	switch r.Method {
-	case http.MethodPut:
+	//case http.MethodPut | http.MethodPost:
+	case http.MethodPost:
+		shimMgtLog.Debug("request for POST/PUT")
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			shimMgtLog.WithError(err).Error("failed to read request body")
@@ -214,6 +219,7 @@ func (s *service) genericIPTablesHandler(w http.ResponseWriter, r *http.Request,
 		w.Write([]byte(""))
 
 	case http.MethodGet:
+		shimMgtLog.Debug("request for GET....")
 		// TODO
 		buf, err := s.sandbox.GetIPTables(context.Background(), isIPv6)
 		if err != nil {
@@ -223,6 +229,7 @@ func (s *service) genericIPTablesHandler(w http.ResponseWriter, r *http.Request,
 		}
 		w.Write(buf)
 	default:
+		shimMgtLog.Debug("Unsupported request method")
 		w.WriteHeader(http.StatusNotImplemented)
 		return
 	}
