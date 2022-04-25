@@ -77,6 +77,8 @@ func DoPut(sandboxID string, timeoutInSeconds time.Duration, urlPath, contentTyp
 	}
 	req.Header.Set("Content-Type", contentType)
 
+	fmt.Println("DEBUG: here's what the request looks like: ", req.Method)
+
 	resp, err := client.Do(req)
 	defer func() {
 		if resp != nil {
@@ -86,13 +88,13 @@ func DoPut(sandboxID string, timeoutInSeconds time.Duration, urlPath, contentTyp
 	return err
 }
 
-func DoPost(sandboxID string, timeoutInSeconds time.Duration, urlPath string, payload []byte) error {
+func DoPost(sandboxID string, timeoutInSeconds time.Duration, urlPath, contentType string, payload []byte) error {
 	client, err := BuildShimClient(sandboxID, timeoutInSeconds)
 	if err != nil {
 		return err
 	}
 
-	resp, err := client.Post(fmt.Sprintf("http://shim/%s", urlPath), "application/json", bytes.NewBuffer(payload))
+	resp, err := client.Post(fmt.Sprintf("http://shim/%s", urlPath), contentType, bytes.NewBuffer(payload))
 	defer func() {
 		if resp != nil {
 			resp.Body.Close()
