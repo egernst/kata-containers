@@ -1,0 +1,94 @@
+package main
+
+import (
+	"fmt"
+	"io/ioutil"
+
+	"github.com/kata-containers/kata-containers/src/runtime/pkg/katautils"
+	"github.com/urfave/cli"
+)
+
+var (
+	sandboxID    string
+	iptablesFile string
+	isIPv6       bool = false
+)
+var iptablesSubCmds = []cli.Command{
+	getIPTablesCommand,
+	setIPTablesCommand,
+}
+
+var kataIPTablesCommand = cli.Command{
+	Name:        "iptables",
+	Usage:       "get or set iptables within the Kata Containers guest",
+	Subcommands: iptablesSubCmds,
+	Action: func(context *cli.Context) {
+		cli.ShowSubcommandHelp(context)
+	},
+}
+
+var getIPTablesCommand = cli.Command{
+	Name:  "get",
+	Usage: "get iptables from the Kata Containers guest",
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:        "sandbox-id",
+			Usage:       "the target sandbox for getting the iptables",
+			Destination: &sandboxID,
+		},
+		cli.BoolFlag{
+			Name:        "isIPv6",
+			Usage:       "indicate we're requesting ipv6 iptables",
+			Destination: &isIPv6,
+		},
+	},
+	Action: func(c *cli.Context) error {
+		return nil
+	},
+}
+
+var setIPTablesCommand = cli.Command{
+	Name:  "set",
+	Usage: "set iptables in a specifc Kata Containers guest based on file",
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:        "sandbox-id",
+			Usage:       "the target sandbox for setting the iptables",
+			Required:    true,
+			Destination: &sandboxID,
+		},
+		cli.BoolFlag{
+			Name:        "isIPv6",
+			Usage:       "indicate we're requesting ipv6 iptables",
+			Destination: &isIPv6,
+		},
+	},
+	Action: func(c *cli.Context) error {
+		iptablesFile := c.Args().Get(0)
+
+		// verify sandbox exists:
+		if err := katautils.VerifyContainerID(sandboxID); err != nil {
+			return err
+		}
+
+		// verify iptables were provided:
+		if iptablesFile == "" {
+			return fmt.Errorf("iptables file not provided")
+		}
+		if !katautils.FileExists(iptablesFile) {
+			return fmt.Errorf("iptables file does not exist: %s", iptablesFile)
+		}
+
+		// Read file into buffer, and make request to the appropriate shim
+		buff, err := ioutil.ReadFile(iptablesFile)
+		if err != nil {
+			return err
+		}
+
+		// create request
+		// post request
+		//body, errurl := url.PathEsca
+
+		return nil
+	},
+}
