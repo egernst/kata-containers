@@ -84,6 +84,7 @@ var setIPTablesCommand = cli.Command{
 	Action: func(c *cli.Context) error {
 		iptablesFile := c.Args().Get(0)
 
+		fmt.Println("DEBUG: WE ARE C ALLING SET")
 		// verify sandbox exists:
 		if err := katautils.VerifyContainerID(sandboxID); err != nil {
 			return err
@@ -103,10 +104,17 @@ var setIPTablesCommand = cli.Command{
 			return err
 		}
 
+		fmt.Println("DEBUG: doing the put!")
 		url := containerdshim.IPTablesUrl
 		if isIPv6 {
 			url = containerdshim.IP6TablesUrl
 		}
-		return shimclient.DoPut(sandboxID, defaultTimeout, url, "application/octet-stream", buf)
+
+		//		return shimclient.DoPost(sandboxID, defaultTimeout, url, "application/octet-stream", buf)
+
+		if err = shimclient.DoPut(sandboxID, defaultTimeout, url, "application/octet-stream", buf); err != nil {
+			fmt.Println("Well, i see, we have a an error, whoops: ", err)
+		}
+		return err
 	},
 }
