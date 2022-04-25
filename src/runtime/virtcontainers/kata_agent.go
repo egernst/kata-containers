@@ -2195,6 +2195,22 @@ func (k *kataAgent) getAgentMetrics(ctx context.Context, req *grpc.GetMetricsReq
 	return resp.(*grpc.Metrics), nil
 }
 
+func (k *kataAgent) getIPTables(ctx context.Context, isIPv6 bool) ([]byte, error) {
+	resp, err := k.sendReq(ctx, &grpc.GetIPTablesRequest{IsIpv6: isIPv6})
+	if err != nil {
+		return nil, err
+	}
+	return resp.(*grpc.GetIPTablesResponse).Data, nil
+}
+
+func (k *kataAgent) setIPTables(ctx context.Context, isIPv6 bool, data []byte) error {
+	_, err := k.sendReq(ctx, &grpc.SetIPTablesRequest{
+		IsIpv6: isIPv6,
+		Data:   data,
+	})
+	return err
+}
+
 func (k *kataAgent) getGuestVolumeStats(ctx context.Context, volumeGuestPath string) ([]byte, error) {
 	result, err := k.sendReq(ctx, &grpc.VolumeStatsRequest{VolumeGuestPath: volumeGuestPath})
 	if err != nil {

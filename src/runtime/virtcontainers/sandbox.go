@@ -2257,6 +2257,14 @@ func (s *Sandbox) GetAgentURL() (string, error) {
 	return s.agent.getAgentURL()
 }
 
+func (s *Sandbox) GetIPTables(ctx context.Context, isIPv6 bool) ([]byte, error) {
+	return s.agent.getIPTables(ctx, isIPv6)
+}
+
+func (s *Sandbox) SetIPTables(ctx context.Context, isIPv6 bool, data []byte) error {
+	return s.agent.setIPTables(ctx, isIPv6, data)
+}
+
 // GuestVolumeStats return the filesystem stat of a given volume in the guest.
 func (s *Sandbox) GuestVolumeStats(ctx context.Context, volumePath string) ([]byte, error) {
 	guestMountPath, err := s.guestMountPath(volumePath)
