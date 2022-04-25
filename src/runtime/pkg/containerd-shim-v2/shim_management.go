@@ -187,16 +187,17 @@ func (s *service) serveVolumeResize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *service) ip6TablesHandler(w http.ResponseWriter, r *http.Request) {
-	genericIPTablesHandler(w, r, true)
+	s.genericIPTablesHandler(w, r, true)
 }
 
 func (s *service) ipTablesHandler(w http.ResponseWriter, r *http.Request) {
-	genericIPTablesHandler(w, r, false)
+	s.genericIPTablesHandler(w, r, false)
 }
 
 func (s *service) genericIPTablesHandler(w http.ResponseWriter, r *http.Request, isIPv6 bool) {
+	shimMgtLog.Debug("Generic IPTables http handler called")
 	switch r.Method {
-	case "PUT":
+	case http.MethodPut:
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			shimMgtLog.WithError(err).Error("failed to read request body")
@@ -205,18 +206,24 @@ func (s *service) genericIPTablesHandler(w http.ResponseWriter, r *http.Request,
 			return
 		}
 
-		// ok - let's go ahead and call the sandbox api to reach out to the agent:
-		// TODO: function to cal lthe agent... sigh...
-
-		fmt.Println("a put, how neat")
+		if err = s.sandbox.SetIPTables(context.Background(), isIPv6, body); err != nil {
+			shimMgtLog.WithError(err).Error("failed to set IPTables")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+		}
 		w.Write([]byte(""))
-	case "GET":
+
+	case http.MethodGet:
 		// TODO
-		//buf, err := s.sandbox.GetIPTables(context.Background())
-		//w.Write(buf)
+		buf, err := s.sandbox.GetIPTables(context.Background(), isIPv6)
+		if err != nil {
+			shimMgtLog.WithError(err).Error("failed to get IPTables")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+		}
+		w.Write(buf)
 	default:
 		w.WriteHeader(http.StatusNotImplemented)
-		w.Write([]byte(err.Error()))
 		return
 	}
 }

@@ -71,7 +71,7 @@ func DoPut(sandboxID string, timeoutInSeconds time.Duration, urlPath, contentTyp
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPut, urlPath, bytes.NewBuffer(payload))
+	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("http://shim/%s", urlPath), bytes.NewBuffer(payload))
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,9 @@ func DoPut(sandboxID string, timeoutInSeconds time.Duration, urlPath, contentTyp
 
 	resp, err := client.Do(req)
 	defer func() {
-		resp.Body.Close()
+		if resp != nil {
+			resp.Body.Close()
+		}
 	}()
 	return err
 }
@@ -92,7 +94,9 @@ func DoPost(sandboxID string, timeoutInSeconds time.Duration, urlPath string, pa
 
 	resp, err := client.Post(fmt.Sprintf("http://shim/%s", urlPath), "application/json", bytes.NewBuffer(payload))
 	defer func() {
-		resp.Body.Close()
+		if resp != nil {
+			resp.Body.Close()
+		}
 	}()
 	return err
 }
