@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io/ioutil"
 
+	containerdshim "github.com/kata-containers/kata-containers/src/runtime/pkg/containerd-shim-v2"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/katautils"
+	"github.com/kata-containers/kata-containers/src/runtime/pkg/utils/shimclient"
 	"github.com/urfave/cli"
 )
 
@@ -34,6 +36,7 @@ var getIPTablesCommand = cli.Command{
 		cli.StringFlag{
 			Name:        "sandbox-id",
 			Usage:       "the target sandbox for getting the iptables",
+			Required:    true,
 			Destination: &sandboxID,
 		},
 		cli.BoolFlag{
@@ -43,6 +46,21 @@ var getIPTablesCommand = cli.Command{
 		},
 	},
 	Action: func(c *cli.Context) error {
+		fmt.Println("we made it")
+		// verify sandbox exists:
+		if err := katautils.VerifyContainerID(sandboxID); err != nil {
+			return err
+		}
+
+		url := containerdshim.IPTablesUrl
+		if isIPv6 {
+			url = containerdshim.IP6TablesUrl
+		}
+		body, err := shimclient.DoGet(sandboxID, defaultTimeout, url)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(body))
 		return nil
 	},
 }
@@ -80,15 +98,15 @@ var setIPTablesCommand = cli.Command{
 		}
 
 		// Read file into buffer, and make request to the appropriate shim
-		buff, err := ioutil.ReadFile(iptablesFile)
+		buf, err := ioutil.ReadFile(iptablesFile)
 		if err != nil {
 			return err
 		}
 
-		// create request
-		// post request
-		//body, errurl := url.PathEsca
-
-		return nil
+		url := containerdshim.IPTablesUrl
+		if isIPv6 {
+			url = containerdshim.IP6TablesUrl
+		}
+		return shimclient.DoPut(sandboxID, defaultTimeout, url, "application/octet-stream", buf)
 	},
 }
