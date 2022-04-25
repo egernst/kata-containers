@@ -34,6 +34,7 @@ import (
 const (
 	DirectVolumeStatUrl   = "/direct-volume/stats"
 	DirectVolumeResizeUrl = "/direct-volume/resize"
+	IPTablesUrl           = "/iptables"
 )
 
 var (
@@ -184,6 +185,17 @@ func (s *service) serveVolumeResize(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(""))
 }
 
+func (s *service) ipTablesHandler(w http.ResponseWriter, r *http.Request) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		shimMgtLog.WithError(err).Error("failed to read request body")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+		return
+	}
+	w.Write([]byte(""))
+}
+
 func (s *service) startManagementServer(ctx context.Context, ociSpec *specs.Spec) {
 	// metrics socket will under sandbox's bundle path
 	metricsAddress := SocketAddress(s.id)
@@ -208,6 +220,7 @@ func (s *service) startManagementServer(ctx context.Context, ociSpec *specs.Spec
 	m.Handle("/agent-url", http.HandlerFunc(s.agentURL))
 	m.Handle(DirectVolumeStatUrl, http.HandlerFunc(s.serveVolumeStats))
 	m.Handle(DirectVolumeResizeUrl, http.HandlerFunc(s.serveVolumeResize))
+	m.Handle(IPTablesUrl, http.HandlerFunc(s.ipTablesHandler))
 	s.mountPprofHandle(m, ociSpec)
 
 	// register shim metrics

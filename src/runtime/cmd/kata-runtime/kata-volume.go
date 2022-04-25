@@ -10,7 +10,7 @@ import (
 	"net/url"
 
 	containerdshim "github.com/kata-containers/kata-containers/src/runtime/pkg/containerd-shim-v2"
-	"github.com/kata-containers/kata-containers/src/runtime/pkg/direct-volume"
+	volume "github.com/kata-containers/kata-containers/src/runtime/pkg/direct-volume"
 	"github.com/kata-containers/kata-containers/src/runtime/pkg/utils/shimclient"
 
 	"github.com/urfave/cli"
