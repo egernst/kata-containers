@@ -1034,6 +1034,8 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "set_iptables", req);
         is_allowed!(req);
 
+        info!(sl!(), "set_ip_tables: request: {:?}", req);
+
         // create a temp file and write provided ip tables data to the file. If no
         // data is provided, we expect that the resulting file will be empty, and
         // the resulting iptables-restore will clear existing rules.
@@ -1061,12 +1063,14 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
         };
 
         if !output.status.success() {
+        info!(sl!(), "set_ip_tables: request: {:?}", req);
             return Err(ttrpc_error!(
                 ttrpc::Code::INTERNAL,
                 format!("failure: {}: {:?}", cmd, std::str::from_utf8(&output.stderr))
             ));
         }
 
+        info!(sl!(), "set_ip_tables: things seem fine");
         Ok(SetIPTablesResponse {
                         data: output.stdout,
             ..Default::default()
