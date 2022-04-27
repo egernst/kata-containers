@@ -39,6 +39,8 @@ use rustjail::container::{BaseContainer, Container, LinuxContainer};
 use rustjail::process::Process;
 use rustjail::specconv::CreateOpts;
 
+use tempfile::NamedTempFile;
+
 use nix::errno::Errno;
 use nix::mount::MsFlags;
 use nix::sys::stat;
@@ -1018,8 +1020,8 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
             }),
             Err(e) => {
                 warn!(sl!(), "failed to run {}: {:?}", cmd, e.kind());
-                Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
-                //return Err(ttrpc_error!(ttrpc::Code::INTERNAL, e));
+                //Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
+                return Err(ttrpc_error!(ttrpc::Code::INTERNAL, e));
             }
         }
     }
@@ -1032,66 +1034,43 @@ impl protocols::agent_ttrpc::AgentService for AgentService {
         trace_rpc_call!(ctx, "set_iptables", req);
         is_allowed!(req);
 
-        if req.data.len() == 0  {
-            return Err(ttrpc_error!(ttrpc::Code::INTERNAL,format!("nothing provided huh")));
-        }
-
-        let mut cmd = "iptables-restore";
-        if req.is_ipv6 {
-            cmd = "ip6tables-restore"
-        }
-
-        let mut child = Command::new(cmd)
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                warn!(sl!(), "failed to run {}: {:?}", cmd, e.kind());
-                ttrpc_error!(ttrpc::Code::INTERNAL, e)
-            })?;
-
-        //        let mut stdin = child.stdin.take().expect("");
-        let mut stdin = match child.stdin.take() {
-            Some(si) => si,
-            None => {
-                warn!(sl!(), "failed to get stdin from child: {}", cmd);
-                return Err(ttrpc_error!(
-                    ttrpc::Code::INTERNAL,
-                    format!("Failed to get stdin from child: {}", cmd)
-                ));
+        // create a temp file and write provided ip tables data to the file. If no
+        // data is provided, we expect that the resulting file will be empty, and
+        // the resulting iptables-restore will clear existing rules.
+        let mut file = NamedTempFile::new().unwrap();
+        let _ = match file.write(&*req.data) {
+            Ok(size) => size,
+            Err(e) => {
+                warn!(sl!(), "failed to write iptables to temp file");
+                return Err(ttrpc_error!(ttrpc::Code::INTERNAL, e));
             }
         };
 
+        let mut cmd = "iptables-restore";
+        if req.is_ipv6 {
+            cmd = "ip6tables-restore";
+        }
 
-        println!("requested data: {:?}",req);
-
-        let _handle = tokio::spawn(async move {
-            let _result = match stdin.write_all(&*req.data) {
-                Ok(s) => {
-                    println!("okay, we wrote it");
-                    Ok(s) 
-                }
-                Err(e) => {
-                    // probably want to make sure we kill the spawned?
-                    warn!(sl!(), "failed to write stdin for {}: {:?}", cmd, e.kind());
-                    Err(ttrpc_error!(ttrpc::Code::INTERNAL, e))
-                }
-            };
-        });
-        let output = match child.wait_with_output() {
-            Ok(o) => {
-                println!("oh yea, waited..");
-            },
+        let output = match Command::new(cmd).arg("--wait").arg("5").arg(file.path().as_os_str()).output() {
+            //let output = match Command::new(cmd).arg("--wait 5").arg(file.path().as_os_str()).output() {
+            Ok(output) => output,
             Err(e) => {
-                println!("oh lawd here we go, an error");
                 warn!(sl!(), "failed to run {}: {:?}", cmd, e.kind());
                 return Err(ttrpc_error!(ttrpc::Code::INTERNAL, e));
             }
         };
+
+        if !output.status.success() {
+            return Err(ttrpc_error!(
+                ttrpc::Code::INTERNAL,
+                format!("failure: {}: {:?}", cmd, std::str::from_utf8(&output.stderr))
+            ));
+        }
+
         Ok(SetIPTablesResponse {
-//            data: output.stdout,
+                        data: output.stdout,
             ..Default::default()
         })
-
     }
 
     async fn list_interfaces(
@@ -2856,15 +2835,12 @@ OtherField:other
             sandbox: Arc::new(Mutex::new(sandbox)),
         });
 
-        let req = protocols::agent::GetIPTablesRequest::default();
         let ctx = mk_ttrpc_context();
 
-        //       let _handle = tokio::spawn(async move {
-
-        // Verify no IPTables:
-
+        // Move to a new netns in order to ensure we don't trash the hosts' iptables
         unshare(CloneFlags::CLONE_NEWNET).unwrap();
 
+        // Get initial iptables, we expect to be empty:
         let result = agent_service
             .get_ip_tables(
                 &ctx,
@@ -2873,38 +2849,83 @@ OtherField:other
                     ..Default::default()
                 },
             )
-            .await
-            .unwrap();
-        // Verify no IPTables to start:
-        let buf = result.data;
-        assert_eq!(buf.len(), 0);
+            .await;
+        assert!(result.is_ok(), "get ip tables should succeed");
+        assert_eq!(
+            result.unwrap().data.len(),
+            0,
+            "ip tables should be empty initially"
+        );
 
-        println!("OK, empty to start - let's set a rule");
+        // Initial ip6 ip tables should also be empty:
+        let result = agent_service
+            .get_ip_tables(
+                &ctx,
+                GetIPTablesRequest {
+                    is_ipv6: true,
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(result.is_ok(), "get ip tables should succeed");
+        assert_eq!(
+            result.unwrap().data.len(),
+            0,
+            "ip tables should be empty initially"
+        );
 
-        // Setup an iptable:
-        let rules = r#"
+        // Verify that attempting to write 'empty' iptables results in no error:
+        let empty_rules = "";
+        let result = agent_service
+            .set_ip_tables(
+                &ctx,
+                SetIPTablesRequest {
+                    is_ipv6: false,
+                    data: empty_rules.as_bytes().to_vec(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(result.is_ok(), "set ip tables with no data should succeed");
+
+        // Verify that attempting to write "garbage" iptables results in an error:
+        let garbage_rules = r#"
+this
+is
+just garbage
+"#;
+        let result = agent_service
+            .set_ip_tables(
+                &ctx,
+                SetIPTablesRequest {
+                    is_ipv6: false,
+                    data: garbage_rules.as_bytes().to_vec(),
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(result.is_err(), "set iptables with garbage should fail");
+
+        // Verify setup of valid iptables:Setup  valid set of iptables:
+        let valid_rules = r#"
 *nat
 -A PREROUTING -d 192.168.103.153/32 -j DNAT --to-destination 192.168.188.153
 
 COMMIT
 
 "#;
-
-        // Set ip tables:
         let result = agent_service
             .set_ip_tables(
                 &ctx,
                 SetIPTablesRequest {
                     is_ipv6: false,
-                    data: rules.as_bytes().to_vec(),
+                    data: valid_rules.as_bytes().to_vec(),
                     //data: buf,
                     ..Default::default()
                 },
             )
-            .await
-            .unwrap();
-
-        println!("OK, let's check what we set");
+            .await;
+        assert!(result.is_ok(), "set ip tables should succeed");
 
         let result = agent_service
             .get_ip_tables(
@@ -2916,9 +2937,16 @@ COMMIT
             )
             .await
             .unwrap();
-        assert_eq!(rules, String::from_utf8(result.data.clone()).unwrap());
+        assert!(result.data.len() > 0, "we should have non-zero output:");
 
-        println!("at end...original thread");
+//        let the_ipt = String::from_utf8(result.unwrap().data.clone()).unwrap();
+        assert!(String::from_utf8(result.data.clone())
+                    .unwrap()
+                    .contains("PREROUTING -d 192.168.103.153/32 -j DNAT --to-destination 192.168.188.153"), "We should see the resulting rule");
+
+
+
+
     }
 }
 

@@ -17,6 +17,7 @@ capctl = "0.2.0"
 serde_json = "1.0.39"
 scan_fmt = "0.2.3"
 scopeguard = "1.0.0"
+tempfile = "3.1.0"
 thiserror = "1.0.26"
 regex = "1.5.4"
 serial_test = "0.5.1"
@@ -27,7 +28,7 @@ async-trait = "0.1.42"
 async-recursion = "0.3.2"
 futures = "0.3.17"
 
-# Async runtime
+# Asyn runtime
 tokio = { version = "1.14.0", features = ["full"] }
 tokio-vsock = "0.3.1"
 
@@ -63,8 +64,6 @@ serde = { version = "1.0.129", features = ["derive"] }
 toml = "0.5.8"
 clap = { version = "3.0.1", features = ["derive"] }
 
-[dev-dependencies]
-tempfile = "3.1.0"
 
 [workspace]
 members = [
