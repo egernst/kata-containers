@@ -32,10 +32,10 @@ import (
 )
 
 const (
-	DirectVolumeStatUrl   = "/direct-volume/stats"
-	DirectVolumeResizeUrl = "/direct-volume/resize"
-	IPTablesUrl           = "/iptables"
-	IP6TablesUrl          = "/ip6tables"
+	DirectVolumeStatUrl   = "direct-volume/stats"
+	DirectVolumeResizeUrl = "direct-volume/resize"
+	IPTablesUrl           = "iptables"
+	IP6TablesUrl          = "ip6tables"
 )
 
 var (
