@@ -8,6 +8,7 @@ package virtcontainers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 
 	hv "github.com/kata-containers/kata-containers/src/runtime/pkg/hypervisors"
@@ -28,17 +29,22 @@ func (m *mockHypervisor) Capabilities(ctx context.Context) types.Capabilities {
 }
 
 func (m *mockHypervisor) HypervisorConfig() HypervisorConfig {
-	return HypervisorConfig{}
+	return m.config
 }
 
 func (m *mockHypervisor) setConfig(config *HypervisorConfig) error {
+	m.config = *config
 	return nil
 }
 
 func (m *mockHypervisor) CreateVM(ctx context.Context, id string, network Network, hypervisorConfig *HypervisorConfig) error {
+	fmt.Printf("oh my we are creating the VM: %d", hypervisorConfig.MemorySize)
 	if err := m.setConfig(hypervisorConfig); err != nil {
 		return err
 	}
+
+	fmt.Printf("from the mock: %d", m.config.MemorySize)
+	fmt.Printf("from the mock: %d", m.GetTotalMemoryMB(ctx))
 
 	return nil
 }

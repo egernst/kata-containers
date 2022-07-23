@@ -2037,7 +2037,6 @@ func (s *Sandbox) updateResources(ctx context.Context) error {
 	hconfig := s.hypervisor.HypervisorConfig()
 
 	for {
-		fmt.Println("loooooopOH yeah we passed it")
 		currentMemoryMB := s.hypervisor.GetTotalMemoryMB(ctx)
 
 		maxhotPluggableMemoryMB := currentMemoryMB * acpiMemoryHotplugFactor

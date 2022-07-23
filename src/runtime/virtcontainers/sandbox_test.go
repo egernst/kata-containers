@@ -36,13 +36,13 @@ const dirMode = os.FileMode(0750) | os.ModeDir
 
 func newHypervisorConfig(kernelParams []Param, hParams []Param) HypervisorConfig {
 	return HypervisorConfig{
-		KernelPath:           filepath.Join(testDir, testKernel),
-		ImagePath:            filepath.Join(testDir, testImage),
-		HypervisorPath:       filepath.Join(testDir, testHypervisor),
-		KernelParams:         kernelParams,
-		HypervisorParams:     hParams,
-		MemorySize:           1,
-		DefaultMaxMemorySize: 8192,
+		KernelPath:       filepath.Join(testDir, testKernel),
+		ImagePath:        filepath.Join(testDir, testImage),
+		HypervisorPath:   filepath.Join(testDir, testHypervisor),
+		KernelParams:     kernelParams,
+		HypervisorParams: hParams,
+		MemorySize:       512,
+		//		DefaultMaxMemorySize: 8192,
 	}
 
 }
@@ -62,11 +62,15 @@ func createTestSandbox(id string,
 		Annotations:      sandboxAnnotations,
 	}
 
+	fmt.Printf("sconfig hypervisor config: %d\n", sconfig.HypervisorConfig.MemorySize)
 	ctx := WithNewAgentFunc(context.Background(), newMockAgent)
 	sandbox, err := createSandbox(ctx, sconfig, nil)
 	if err != nil {
 		return nil, fmt.Errorf("Could not create sandbox: %s", err)
 	}
+
+	fmt.Printf("sconfig hypervisor config: %d\n", sconfig.HypervisorConfig.MemorySize)
+	fmt.Printf("sandbox hypervisor config: %d\n", sandbox.hypervisor.HypervisorConfig().MemorySize)
 
 	if err := sandbox.agent.startSandbox(context.Background(), sandbox); err != nil {
 		return nil, err
@@ -1401,7 +1405,6 @@ func TestSandboxUpdateResources(t *testing.T) {
 	contConfig1 := newTestContainerConfigNoop("cont-00001")
 	contConfig2 := newTestContainerConfigNoop("cont-00002")
 	hConfig := newHypervisorConfig(nil, nil)
-
 	defer cleanUp()
 	// create a sandbox
 	s, err := createTestSandbox(
@@ -1412,32 +1415,30 @@ func TestSandboxUpdateResources(t *testing.T) {
 		[]ContainerConfig{contConfig1, contConfig2},
 		nil)
 
-		fmt.Println("OH yeah we passed it")
+	fmt.Printf("THE SIZE: %d\n", s.config.HypervisorConfig.MemorySize)
+	fmt.Printf("THE SIZE: %d\n", s.hypervisor.GetTotalMemoryMB(context.Background()))
 	assert.NoError(t, err)
 	err = s.updateResources(context.Background())
 	assert.NoError(t, err)
-		fmt.Println("iniitla resources are blaaaank!")
 
-	containerMemLimit := int64(4194304*1024)
+	containerMemLimit := int64(4194304 * 1024)
 	containerCPUPeriod := uint64(1000)
 	containerCPUQouta := int64(5)
-	for idx, c := range s.config.Containers {
+	for idx, _ := range s.config.Containers {
 		s.config.Containers[idx].Resources.Memory = &specs.LinuxMemory{
 			Limit: new(int64),
 		}
-		c.Resources.CPU = &specs.LinuxCPU{
+		s.config.Containers[idx].Resources.CPU = &specs.LinuxCPU{
 			Period: new(uint64),
 			Quota:  new(int64),
 		}
 		s.config.Containers[idx].Resources.Memory.Limit = &containerMemLimit
-		//c.Resources.Memory.Limit = &containerMemLimit
-		c.Resources.CPU.Period = &containerCPUPeriod
-		c.Resources.CPU.Quota = &containerCPUQouta
-//		fmt.Printf("the memory stuff: %d\n %+v\n", *s.config.Containers[idx].Resources.Memory.Limit, s.config.Containers[idx].Resources.Memory)
+		s.config.Containers[idx].Resources.CPU.Period = &containerCPUPeriod
+		s.config.Containers[idx].Resources.CPU.Quota = &containerCPUQouta
 	}
-		fmt.Println("calling with new resources ---!")
+	fmt.Println("calling with new resources ---!")
 	err = s.updateResources(context.Background())
-		fmt.Println("OH yeah we passed it")
+	fmt.Println("OH yeah we passed it")
 	assert.NoError(t, err)
 }
 
