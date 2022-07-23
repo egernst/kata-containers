@@ -36,11 +36,13 @@ const dirMode = os.FileMode(0750) | os.ModeDir
 
 func newHypervisorConfig(kernelParams []Param, hParams []Param) HypervisorConfig {
 	return HypervisorConfig{
-		KernelPath:       filepath.Join(testDir, testKernel),
-		ImagePath:        filepath.Join(testDir, testImage),
-		HypervisorPath:   filepath.Join(testDir, testHypervisor),
-		KernelParams:     kernelParams,
-		HypervisorParams: hParams,
+		KernelPath:           filepath.Join(testDir, testKernel),
+		ImagePath:            filepath.Join(testDir, testImage),
+		HypervisorPath:       filepath.Join(testDir, testHypervisor),
+		KernelParams:         kernelParams,
+		HypervisorParams:     hParams,
+		MemorySize:           1024,
+		DefaultMaxMemorySize: 8192,
 	}
 
 }
