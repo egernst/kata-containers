@@ -18,6 +18,7 @@ var MockHybridVSockPath = "/tmp/kata-mock-hybrid-vsock.socket"
 
 type mockHypervisor struct {
 	mockPid int
+	config  HypervisorConfig
 }
 
 func (m *mockHypervisor) Capabilities(ctx context.Context) types.Capabilities {
@@ -99,7 +100,7 @@ func (m *mockHypervisor) ResizeVCPUs(ctx context.Context, cpus uint32) (uint32, 
 }
 
 func (m *mockHypervisor) GetTotalMemoryMB(ctx context.Context) uint32 {
-	return 0
+	return m.config.MemorySize
 }
 func (m *mockHypervisor) Disconnect(ctx context.Context) {
 }
