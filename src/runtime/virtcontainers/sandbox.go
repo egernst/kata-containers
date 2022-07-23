@@ -1985,6 +1985,7 @@ func (s *Sandbox) updateResources(ctx context.Context) error {
 
 	sandboxMemoryByte, sandboxneedPodSwap, sandboxSwapByte := s.calculateSandboxMemory()
 
+	fmt.Printf("sandbox memory bytes: %d\n", sandboxMemoryByte)
 	// Add default / rsvd memory for sandbox.
 	hypervisorMemoryByteI64 := int64(s.hypervisor.HypervisorConfig().MemorySize) << utils.MibToBytesShift
 	hypervisorMemoryByte := uint64(hypervisorMemoryByteI64)
@@ -2036,9 +2037,11 @@ func (s *Sandbox) updateResources(ctx context.Context) error {
 	hconfig := s.hypervisor.HypervisorConfig()
 
 	for {
+		fmt.Println("loooooopOH yeah we passed it")
 		currentMemoryMB := s.hypervisor.GetTotalMemoryMB(ctx)
 
 		maxhotPluggableMemoryMB := currentMemoryMB * acpiMemoryHotplugFactor
+		fmt.Printf("max hotpluggable: %d\n", maxhotPluggableMemoryMB)
 
 		// In the case of virtio-mem, we don't have a restriction on how much can be hotplugged at
 		// a single time. As a result, the max hotpluggable is only limited my the maximum memory size
@@ -2048,8 +2051,10 @@ func (s *Sandbox) updateResources(ctx context.Context) error {
 		}
 
 		deltaMB := finalMemoryMB - currentMemoryMB
+		fmt.Printf("delta: %d, final %d, current: %d !\n", deltaMB, finalMemoryMB, currentMemoryMB)
 
 		if deltaMB > maxhotPluggableMemoryMB {
+			fmt.Printf("delta: %d, doing the thing!\n", deltaMB)
 			s.Logger().Warnf("Large hotplug. Adding %d MB of %d total memory", maxhotPluggableMemoryMB, deltaMB)
 			newMemoryMB = currentMemoryMB + maxhotPluggableMemoryMB
 		} else {

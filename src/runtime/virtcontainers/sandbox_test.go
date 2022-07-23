@@ -41,12 +41,51 @@ func newHypervisorConfig(kernelParams []Param, hParams []Param) HypervisorConfig
 		HypervisorPath:       filepath.Join(testDir, testHypervisor),
 		KernelParams:         kernelParams,
 		HypervisorParams:     hParams,
-		MemorySize:           1024,
+		MemorySize:           1,
 		DefaultMaxMemorySize: 8192,
 	}
 
 }
 
+func createTestSandbox(id string,
+	htype HypervisorType, hconfig HypervisorConfig,
+	nconfig NetworkConfig, containers []ContainerConfig,
+	volumes []types.Volume) (*Sandbox, error) {
+
+	sconfig := SandboxConfig{
+		ID:               id,
+		HypervisorType:   htype,
+		HypervisorConfig: hconfig,
+		NetworkConfig:    nconfig,
+		Volumes:          volumes,
+		Containers:       containers,
+		Annotations:      sandboxAnnotations,
+	}
+
+	ctx := WithNewAgentFunc(context.Background(), newMockAgent)
+	sandbox, err := createSandbox(ctx, sconfig, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Could not create sandbox: %s", err)
+	}
+
+	if err := sandbox.agent.startSandbox(context.Background(), sandbox); err != nil {
+		return nil, err
+	}
+
+	if err := sandbox.createContainers(context.Background()); err != nil {
+		return nil, err
+	}
+
+	if sandbox.id == "" {
+		return sandbox, fmt.Errorf("Invalid empty sandbox ID")
+	}
+
+	if id != "" && sandbox.id != id {
+		return sandbox, fmt.Errorf("Invalid ID %s vs %s", id, sandbox.id)
+	}
+
+	return sandbox, nil
+}
 func testCreateSandbox(t *testing.T, id string,
 	htype HypervisorType, hconfig HypervisorConfig,
 	nconfig NetworkConfig, containers []ContainerConfig,
@@ -1365,7 +1404,7 @@ func TestSandboxUpdateResources(t *testing.T) {
 
 	defer cleanUp()
 	// create a sandbox
-	s, err := testCreateSandbox(t,
+	s, err := createTestSandbox(
 		testSandboxID,
 		MockHypervisor,
 		hConfig,
@@ -1373,26 +1412,32 @@ func TestSandboxUpdateResources(t *testing.T) {
 		[]ContainerConfig{contConfig1, contConfig2},
 		nil)
 
+		fmt.Println("OH yeah we passed it")
 	assert.NoError(t, err)
 	err = s.updateResources(context.Background())
 	assert.NoError(t, err)
+		fmt.Println("iniitla resources are blaaaank!")
 
-	containerMemLimit := int64(1000)
+	containerMemLimit := int64(4194304*1024)
 	containerCPUPeriod := uint64(1000)
 	containerCPUQouta := int64(5)
-	for _, c := range s.config.Containers {
-		c.Resources.Memory = &specs.LinuxMemory{
+	for idx, c := range s.config.Containers {
+		s.config.Containers[idx].Resources.Memory = &specs.LinuxMemory{
 			Limit: new(int64),
 		}
 		c.Resources.CPU = &specs.LinuxCPU{
 			Period: new(uint64),
 			Quota:  new(int64),
 		}
-		c.Resources.Memory.Limit = &containerMemLimit
+		s.config.Containers[idx].Resources.Memory.Limit = &containerMemLimit
+		//c.Resources.Memory.Limit = &containerMemLimit
 		c.Resources.CPU.Period = &containerCPUPeriod
 		c.Resources.CPU.Quota = &containerCPUQouta
+//		fmt.Printf("the memory stuff: %d\n %+v\n", *s.config.Containers[idx].Resources.Memory.Limit, s.config.Containers[idx].Resources.Memory)
 	}
+		fmt.Println("calling with new resources ---!")
 	err = s.updateResources(context.Background())
+		fmt.Println("OH yeah we passed it")
 	assert.NoError(t, err)
 }
 
