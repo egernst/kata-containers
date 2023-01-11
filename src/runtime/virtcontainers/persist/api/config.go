@@ -7,7 +7,6 @@
 package persistapi
 
 import (
-	"github.com/opencontainers/runc/libcontainer/configs"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -245,7 +244,7 @@ type ContainerConfig struct {
 type SandboxConfig struct {
 	// Cgroups specifies specific cgroup settings for the various subsystems that the container is
 	// placed into to limit the resources the container has available
-	Cgroups *configs.Cgroup `json:"cgroups"`
+	//Cgroups *configs.Cgroup `json:"cgroups"`
 
 	// only one agent config can be non-nil according to agent type
 	KataAgentConfig *KataAgentConfig `json:",omitempty"`
