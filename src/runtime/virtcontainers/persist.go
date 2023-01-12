@@ -189,7 +189,8 @@ func (s *Sandbox) dumpConfig(ss *persistapi.SandboxState) {
 		SystemdCgroup:       sconfig.SystemdCgroup,
 		SandboxCgroupOnly:   sconfig.SandboxCgroupOnly,
 		DisableGuestSeccomp: sconfig.DisableGuestSeccomp,
-		GuestSeLinuxLabel:   sconfig.GuestSeLinuxLabel,
+
+		GuestSeLinuxLabel: sconfig.GuestSeLinuxLabel,
 	}
 
 	ss.Config.SandboxBindMounts = append(ss.Config.SandboxBindMounts, sconfig.SandboxBindMounts...)
@@ -430,7 +431,9 @@ func loadSandboxConfig(id string) (*SandboxConfig, error) {
 		SystemdCgroup:       savedConf.SystemdCgroup,
 		SandboxCgroupOnly:   savedConf.SandboxCgroupOnly,
 		DisableGuestSeccomp: savedConf.DisableGuestSeccomp,
-		GuestSeLinuxLabel:   savedConf.GuestSeLinuxLabel,
+		EnableVCPUsPinning:  savedConf.EnableVCPUsPinning,
+
+		GuestSeLinuxLabel: savedConf.GuestSeLinuxLabel,
 	}
 	sconfig.SandboxBindMounts = append(sconfig.SandboxBindMounts, savedConf.SandboxBindMounts...)
 
